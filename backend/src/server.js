@@ -1,5 +1,5 @@
 import app from './app.js';
-import { connectToDatabase, syncDatabase } from './config/database.js';
+import { connectToDatabase, setupExtraTables, syncDatabase } from './config/database.js';
 import { applySchema } from './config/schema.js';
 import { seedDatabase } from './config/seedData.js';
 
@@ -9,6 +9,7 @@ const startServer = async () => {
   try {
     await connectToDatabase();
     await applySchema();
+    await setupExtraTables();
     await syncDatabase();
     // Temporarily disabled to avoid duplicate key errors
     // await seedDatabase();

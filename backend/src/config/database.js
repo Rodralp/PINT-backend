@@ -29,7 +29,9 @@ export const sequelize = new Sequelize(DB_NAME, DB_USER, DB_PASSWORD, {
 
 export const connectToDatabase = async () => {
   await sequelize.authenticate();
+};
 
+export const setupExtraTables = async () => {
   await sequelize.query(`
     CREATE TABLE IF NOT EXISTS badge_expiracao_log (
       nlog_expiracao INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
