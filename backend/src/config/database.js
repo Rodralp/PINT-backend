@@ -54,16 +54,6 @@ export const setupExtraTables = async () => {
     );
   `);
 
-  await sequelize.query(`
-    CREATE TABLE IF NOT EXISTS utilizador_imagem (
-      nutilizador INTEGER PRIMARY KEY REFERENCES utilizador(nutilizador) ON DELETE CASCADE,
-      mime_type VARCHAR(50) NOT NULL DEFAULT 'image/png',
-      dados BYTEA NOT NULL,
-      criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-
   try {
     await sequelize.query(`
       INSERT INTO badge_imagem (nbadge, mime_type, dados, criado_em, atualizado_em)
