@@ -1,5 +1,6 @@
 import { QueryTypes } from 'sequelize';
 import { Reminder } from './sql/Reminder.js';
+import { Account } from './sql/Account.js';
 import { sequelize } from '../config/database.js';
 import { adminBadgeModel } from './adminBadgeModel.js';
 const { loadBadgeImagesBatch } = adminBadgeModel;
@@ -2739,6 +2740,19 @@ export const consultorModel = {
     const data = await buildProfileData(accountId);
     return clone(data);
   },
+
+  async updateProfileData(accountId, updates) {
+    const fields = {};
+    if (typeof updates.nome === 'string') {
+      fields.nome = updates.nome.trim();
+    }
+    if (Object.keys(fields).length === 0) {
+      return { updated: false };
+    }
+    await Account.update(fields, { where: { id: Number(accountId) } });
+    return { updated: true };
+  },
+
   async saveEvidences(accountId, pedidoId, nreq, fileMeta) {
     const data = await saveEvidences(accountId, pedidoId, nreq, fileMeta);
     return clone(data);

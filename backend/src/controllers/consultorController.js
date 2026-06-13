@@ -267,6 +267,22 @@ export const getProfileData = async (req, res) => {
   }
 };
 
+export const updateProfileData = async (req, res) => {
+  const accountId = parseAccountId(req.body?.accountId);
+
+  if (!accountId) {
+    res.status(400).json({ message: 'accountId is required.' });
+    return;
+  }
+
+  try {
+    const result = await consultorService.updateProfileData(accountId, req.body);
+    res.status(200).json(result);
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to update profile data.', error: error.message });
+  }
+};
+
 export const uploadEvidence = async (req, res) => {
   const pedidoId = Number(req.params?.pedidoId);
   const nreq = Number(req.body?.nreq);

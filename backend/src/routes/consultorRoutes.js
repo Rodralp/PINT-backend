@@ -18,6 +18,7 @@ import {
   getRankingConsultores,
   getReminders,
   savePreferences,
+  updateProfileData,
   updateReminder,
   uploadEvidence,
   getBadgeRequirements,
@@ -68,6 +69,7 @@ router.put('/lembretes/:id', updateReminder);
 router.delete('/lembretes/:id', deleteReminder);
 router.post('/pedidos/:pedidoId/evidencias', upload.array('files'), uploadEvidence);
 router.get('/profile', getProfileData);
+router.put('/profile', updateProfileData);
 router.get('/badge/:badgeId/requirements', getBadgeRequirements);
 router.get('/expiring-soon', getExpiringSoonBadgesForUser);
 

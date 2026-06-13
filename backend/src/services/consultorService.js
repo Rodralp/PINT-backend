@@ -64,6 +64,11 @@ export const consultorService = {
   async getProfileData(accountId) {
     return consultorModel.getProfileData(accountId);
   },
+
+  async updateProfileData(accountId, updates) {
+    return consultorModel.updateProfileData(accountId, updates);
+  },
+
   async saveEvidences(accountId, pedidoId, nreq, fileMeta) {
     return consultorModel.saveEvidences(accountId, pedidoId, nreq, fileMeta);
   },
