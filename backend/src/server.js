@@ -11,8 +11,12 @@ const startServer = async () => {
     await applySchema();
     await setupExtraTables();
     await syncDatabase();
-    // Temporarily disabled to avoid duplicate key errors
-    // await seedDatabase();
+    try {
+      await seedDatabase();
+      console.log('Database seeded successfully');
+    } catch (seedError) {
+      console.error('Seed failed (non-fatal):', seedError.message);
+    }
 
     app.listen(PORT, () => {
       console.log(`API running on http://localhost:${PORT}`);
