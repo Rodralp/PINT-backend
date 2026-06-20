@@ -165,7 +165,7 @@ const formatLongDate = (value) => {
   });
 };
 
-const buildAvatar = (seed) => `https://i.pravatar.cc/120?u=${encodeURIComponent(String(seed || 'user').toLowerCase())}`;
+const buildAvatar = () => null;
 
 const getServiceLineIdForBadge = async (badgeId) => {
   const parsedBadgeId = Number(badgeId);
@@ -544,8 +544,6 @@ const buildRoleJoin = (role) => {
 };
 
 const fetchRequestRows = async ({ role, actorUtilizadorId, requestId = null }) => {
-  await autoRejectExpiredRequests();
-  await adminBadgeModel.checkAndExpireBadges();
   const roleJoin = buildRoleJoin(role);
   const roleStatusClause = buildRoleStatusClause(role);
   const whereClause = requestId
@@ -1210,7 +1208,18 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
   }
 };
 
+const runScheduledSideEffects = async () => {
+  await autoRejectExpiredRequests();
+  try {
+    const { adminBadgeModel } = await import('./adminBadgeModel.js');
+    await adminBadgeModel.checkAndExpireBadges();
+  } catch (e) {
+    console.error('Error checking expired badges in scheduler:', e);
+  }
+};
+
 export const requestManagementModel = {
+  runScheduledSideEffects,
   async getManagedRequests(role, accountId) {
     const parsedRole = parseRole(role);
     if (!parsedRole) {

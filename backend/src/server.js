@@ -5,6 +5,9 @@ import { seedDatabase } from './config/seedData.js';
 
 const PORT = Number(globalThis.process?.env?.PORT) || 4000;
 
+let lastSideEffectRun = 0;
+const SIDE_EFFECT_INTERVAL_MS = 60_000;
+
 const startServer = async () => {
   try {
     await connectToDatabase();
@@ -17,6 +20,18 @@ const startServer = async () => {
     } catch (seedError) {
       console.error('Seed failed (non-fatal):', seedError.message);
     }
+
+    const { requestManagementModel } = await import('./models/requestManagementModel.js');
+    setInterval(async () => {
+      const now = Date.now();
+      if (now - lastSideEffectRun < SIDE_EFFECT_INTERVAL_MS) return;
+      lastSideEffectRun = now;
+      try {
+        await requestManagementModel.runScheduledSideEffects();
+      } catch (err) {
+        console.error('Scheduled side-effects error:', err);
+      }
+    }, SIDE_EFFECT_INTERVAL_MS);
 
     app.listen(PORT, () => {
       console.log(`API running on http://localhost:${PORT}`);
