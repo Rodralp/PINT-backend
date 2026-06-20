@@ -1,7 +1,25 @@
 import { QueryTypes } from 'sequelize';
 import { sequelize } from '../config/database.js';
 
-const saveUserImage = async (accountId, mimeType, base64Data) => {
+const saveUserImage = async (accountId, imageDataOrMimeType, maybeBase64Data) => {
+  let mimeType = 'image/png';
+  let base64Data;
+
+  if (maybeBase64Data !== undefined) {
+    mimeType = imageDataOrMimeType;
+    base64Data = maybeBase64Data;
+  } else if (typeof imageDataOrMimeType === 'string' && imageDataOrMimeType.startsWith('data:')) {
+    const match = imageDataOrMimeType.match(/^data:([^;]+);base64,(.+)$/);
+    if (match) {
+      mimeType = match[1];
+      base64Data = match[2];
+    } else {
+      base64Data = imageDataOrMimeType;
+    }
+  } else {
+    base64Data = imageDataOrMimeType;
+  }
+
   const buffer = Buffer.from(base64Data, 'base64');
   await sequelize.query(
     `
@@ -77,6 +95,7 @@ const deleteUserImage = async (accountId) => {
 export const utilizadorImagemModel = {
   saveUserImage,
   getUserImage,
+  loadUserImage: getUserImage,
   loadUserImagesBatch,
   deleteUserImage,
 };
