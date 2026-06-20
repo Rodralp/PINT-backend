@@ -1247,7 +1247,8 @@ const _buildProfileDataInner = async (parsedAccountId) => {
   let avatar = null;
   try {
     const { utilizadorImagemModel } = await import('./utilizadorImagemModel.js');
-    avatar = await utilizadorImagemModel.loadUserImage(parsedAccountId);
+    const imageResult = await utilizadorImagemModel.loadUserImage(parsedAccountId);
+    avatar = imageResult?.dataUrl || null;
   } catch { /* no image */ }
 
   return {
