@@ -725,18 +725,6 @@ const sendAllExpirationNotifications = async () => {
 
     const notifiedSet = new Set();
 
-    const adminRows = await sequelize.query(
-      `SELECT nutilizador AS id FROM utilizador WHERE LOWER(status) = 'ativo' AND LOWER(permissoes) LIKE '%admin-gestor%'`,
-      { type: QueryTypes.SELECT },
-    );
-    const adminIds = adminRows.map((r) => Number(r.id)).filter((id) => Number.isInteger(id) && id > 0);
-
-    const tmRows = await sequelize.query(
-      `SELECT nutilizador AS id FROM utilizador WHERE LOWER(status) = 'ativo' AND LOWER(permissoes) LIKE '%talent-manager%'`,
-      { type: QueryTypes.SELECT },
-    );
-    const tmIds = tmRows.map((r) => Number(r.id)).filter((id) => Number.isInteger(id) && id > 0);
-
     for (const badge of expiringBadges) {
       const validade = new Date(badge.validade);
       const today = new Date();
@@ -747,9 +735,6 @@ const sendAllExpirationNotifications = async () => {
       }
 
       const recipientSet = new Set();
-
-      for (const id of adminIds) recipientSet.add(id);
-      for (const id of tmIds) recipientSet.add(id);
 
       const consultorRows = await sequelize.query(
         `
@@ -768,6 +753,24 @@ const sendAllExpirationNotifications = async () => {
         if (Number.isInteger(id) && id > 0) {
           recipientSet.add(id);
         }
+      }
+
+      const adminRows = await sequelize.query(
+        `SELECT nutilizador AS id FROM utilizador WHERE LOWER(status) = 'ativo' AND LOWER(permissoes) LIKE '%admin-gestor%'`,
+        { type: QueryTypes.SELECT },
+      );
+      for (const row of adminRows) {
+        const id = Number(row.id);
+        if (Number.isInteger(id) && id > 0) recipientSet.add(id);
+      }
+
+      const tmRows = await sequelize.query(
+        `SELECT nutilizador AS id FROM utilizador WHERE LOWER(status) = 'ativo' AND LOWER(permissoes) LIKE '%talent-manager%'`,
+        { type: QueryTypes.SELECT },
+      );
+      for (const row of tmRows) {
+        const id = Number(row.id);
+        if (Number.isInteger(id) && id > 0) recipientSet.add(id);
       }
 
       const sllServiceLines = await sequelize.query(
@@ -866,6 +869,21 @@ const loadRequirementsByBadgeIds = async (badgeIds) => {
   return requirementsByBadge;
 };
 
+const rankingConsultores = [
+  { id: 1, name: 'Joao Gomes', email: 'joaogomes1234@softinsa.pt', points: 2450, badges: 12, serviceLine: 'Cloud', avatar: 'https://i.pravatar.cc/120?u=joao.gomes' },
+  { id: 2, name: 'Maria Santos', email: 'maria.santos@softinsa.pt', points: 2200, badges: 10, serviceLine: 'Data & AI', avatar: 'https://i.pravatar.cc/120?u=maria.santos' },
+  { id: 3, name: 'Pedro Mendes', email: 'pedro.mendes@softinsa.pt', points: 1950, badges: 9, serviceLine: 'Cloud', avatar: 'https://i.pravatar.cc/120?u=pedro.mendes' },
+  { id: 4, name: 'Ana Costa', email: 'ana.costa@softinsa.pt', points: 1700, badges: 8, serviceLine: 'LowCode', avatar: 'https://i.pravatar.cc/120?u=ana.costa' },
+  { id: 5, name: 'Carlos Ferreira', email: 'carlos.ferreira@softinsa.pt', points: 1500, badges: 7, serviceLine: 'Cybersecurity', avatar: 'https://i.pravatar.cc/120?u=carlos.ferreira' },
+  { id: 6, name: 'Rita Oliveira', email: 'rita.oliveira@softinsa.pt', points: 1450, badges: 7, serviceLine: 'Data & AI', avatar: 'https://i.pravatar.cc/120?u=rita.oliveira' },
+  { id: 7, name: 'Bruno Alves', email: 'bruno.alves@softinsa.pt', points: 1350, badges: 7, serviceLine: 'Cloud', avatar: 'https://i.pravatar.cc/120?u=bruno.alves' },
+  { id: 8, name: 'Sofia Rodrigues', email: 'sofia.rodrigues@softinsa.pt', points: 1250, badges: 7, serviceLine: 'LowCode', avatar: 'https://i.pravatar.cc/120?u=sofia.rodrigues' },
+  { id: 9, name: 'Giorgian Arrascarta', email: 'giorgian.arrascarta@softinsa.pt', points: 1250, badges: 6, serviceLine: 'Cybersecurity', avatar: 'https://i.pravatar.cc/120?u=giorgian.arrascarta' },
+  { id: 10, name: 'Ana Clara', email: 'ana.clara@softinsa.pt', points: 1200, badges: 6, serviceLine: 'Data & AI', avatar: 'https://i.pravatar.cc/120?u=ana.clara' },
+  { id: 11, name: 'Omar Rocha', email: 'omar.rocha@softinsa.pt', points: 1200, badges: 5, serviceLine: 'Cloud', avatar: 'https://i.pravatar.cc/120?u=omar.rocha' },
+  { id: 12, name: 'Raquel Ribeiro', email: 'raquel.ribeiro@softinsa.pt', points: 1200, badges: 5, serviceLine: 'LowCode', avatar: 'https://i.pravatar.cc/120?u=raquel.ribeiro' },
+];
+
 const buildRankingConsultores = async () => {
   const rows = await sequelize.query(
     `
@@ -906,7 +924,8 @@ const buildRankingConsultores = async () => {
         u.email,
         COALESCE(bs.points, 0) AS points,
         COALESCE(bs.badges, 0) AS badges,
-        COALESCE(dsl.sline, 'Application Operations') AS "serviceLine"
+        COALESCE(dsl.sline, 'Application Operations') AS "serviceLine",
+        'https://i.pravatar.cc/120?u=' || COALESCE(NULLIF(REPLACE(LOWER(u.email), '@', '.'), ''), LOWER(REPLACE(u.nome, ' ', '.'))) AS avatar
       FROM utilizador AS u
       LEFT JOIN badge_scores AS bs
         ON bs.nutilizador = u.nutilizador
@@ -918,62 +937,50 @@ const buildRankingConsultores = async () => {
     { type: QueryTypes.SELECT },
   );
 
-  const consultorIds = rows.map((row) => Number(row.id)).filter(Boolean);
-
-  const allSlStats = consultorIds.length > 0
-    ? await sequelize.query(
+  // For each consultor, fetch their service line stats
+  const consultoresWithStats = await Promise.all(
+    rows.map(async (row) => {
+      const serviceLineRows = await sequelize.query(
         `
           SELECT
-            cb.nutilizador,
             COALESCE(sl.sline, 'Application Operations') AS serviceLine,
             COUNT(DISTINCT b.nbadge) AS badges,
             SUM(COALESCE(NULLIF(cb.pontos_obtidos, 0), NULLIF(b.pontos, 0), 0)) AS points
           FROM c_obtem_b AS cb
-          INNER JOIN badge AS b ON b.nbadge = cb.nbadge
-          LEFT JOIN b_pertence_sl AS bps ON bps.nbadge = b.nbadge
-          LEFT JOIN service_line AS sl ON sl.nsline = bps.nsline
-          WHERE cb.nutilizador IN (:ids)
-          GROUP BY cb.nutilizador, sl.sline
+          INNER JOIN badge AS b
+            ON b.nbadge = cb.nbadge
+          LEFT JOIN b_pertence_sl AS bps
+            ON bps.nbadge = b.nbadge
+          LEFT JOIN service_line AS sl
+            ON sl.nsline = bps.nsline
+          WHERE cb.nutilizador = :accountId
+          GROUP BY sl.sline
+          ORDER BY COUNT(DISTINCT b.nbadge) DESC, SUM(COALESCE(NULLIF(cb.pontos_obtidos, 0), NULLIF(b.pontos, 0), 0)) DESC
         `,
         {
-          replacements: { ids: consultorIds },
+          replacements: { accountId: Number(row.id) },
           type: QueryTypes.SELECT,
         },
-      )
-    : [];
+      );
 
-  const statsByUser = new Map();
-  for (const stat of allSlStats) {
-    const userId = Number(stat.nutilizador);
-    if (!statsByUser.has(userId)) statsByUser.set(userId, []);
-    statsByUser.get(userId).push({
-      serviceLine: stat.serviceLine || 'Application Operations',
-      badges: Number(stat.badges) || 0,
-      points: Number(stat.points) || 0,
-    });
-  }
+      const serviceLineStats = (serviceLineRows || []).map((r) => ({
+        serviceLine: r.serviceline || r.serviceLine || 'Application Operations',
+        badges: Number(r.badges) || 0,
+        points: Number(r.points) || 0,
+      }));
 
-  const consultoresWithStats = rows.map((row) => ({
-    id: Number(row.id),
-    name: row.name,
-    email: row.email,
-    points: Number(row.points) || 0,
-    badges: Number(row.badges) || 0,
-    serviceLine: row.serviceLine || 'Application Operations',
-    avatar: null,
-    serviceLineStats: statsByUser.get(Number(row.id)) || [],
-  }));
-
-  const avatarIds = consultoresWithStats.map((c) => c.id).filter(Boolean);
-  if (avatarIds.length > 0) {
-    try {
-      const { utilizadorImagemModel } = await import('./utilizadorImagemModel.js');
-      const avatarMap = await utilizadorImagemModel.loadUserImagesBatch(avatarIds);
-      for (const c of consultoresWithStats) {
-        if (avatarMap[c.id]) c.avatar = avatarMap[c.id];
-      }
-    } catch { /* no images */ }
-  }
+      return {
+        id: Number(row.id),
+        name: row.name,
+        email: row.email,
+        points: Number(row.points) || 0,
+        badges: Number(row.badges) || 0,
+        serviceLine: row.serviceLine || 'Application Operations',
+        avatar: row.avatar || `https://i.pravatar.cc/120?u=${encodeURIComponent(row.email || row.name || row.id)}`,
+        serviceLineStats,
+      };
+    }),
+  );
 
   return consultoresWithStats;
 };
@@ -1018,6 +1025,12 @@ const buildProfileData = async (accountId) => {
 
   if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) {
     return clone(profileData);
+  }
+
+  try {
+    await autoRejectExpiredRequests();
+  } catch (error) {
+    console.error('Error auto-rejecting expired requests:', error);
   }
 
   try {
@@ -1077,11 +1090,10 @@ const _buildProfileDataInner = async (parsedAccountId) => {
         u.nutilizador AS id,
         u.nome,
         u.email,
-        u.localizacao,
         COALESCE(bs.points, 0) AS points,
         COALESCE(bs.badges, 0) AS badges,
         COALESCE(dsl.sline, 'Application Operations') AS "serviceLine",
-        COALESCE(DATE(u.data_registo), CURRENT_DATE) AS "joined",
+        'https://i.pravatar.cc/120?u=' || COALESCE(NULLIF(REPLACE(LOWER(u.email), '@', '.'), ''), LOWER(REPLACE(u.nome, ' ', '.'))) AS avatar,
         COALESCE(cr.ranking_position, 0) AS ranking
       FROM utilizador AS u
       LEFT JOIN badge_scores AS bs
@@ -1117,7 +1129,7 @@ const _buildProfileDataInner = async (parsedAccountId) => {
       LEFT JOIN service_line AS sl
         ON sl.nsline = bps.nsline
       WHERE cb.nutilizador = :accountId
-      GROUP BY COALESCE(sl.sline, 'Application Operations')
+      GROUP BY sl.sline
       ORDER BY COUNT(DISTINCT b.nbadge) DESC, SUM(COALESCE(NULLIF(cb.pontos_obtidos, 0), NULLIF(b.pontos, 0), 0)) DESC
     `,
     {
@@ -1244,22 +1256,14 @@ const _buildProfileDataInner = async (parsedAccountId) => {
 
   const streakDays = calculateConsecutiveDayStreak((streakRows || []).map((row) => row.activity_date));
 
-  let avatar = null;
-  try {
-    const { utilizadorImagemModel } = await import('./utilizadorImagemModel.js');
-    avatar = await utilizadorImagemModel.loadUserImage(parsedAccountId);
-  } catch { /* no image */ }
-
   return {
     ...clone(profileData),
     points: Number(row.points) || 0,
     badges: Number(row.badges) || 0,
     ranking: Number(row.ranking) || 0,
     streakDays,
-    location: row.localizacao || '',
-    joined: row.joined || '',
     serviceLine: row.serviceLine || 'Application Operations',
-    avatar: avatar || null,
+    avatar: row.avatar || `https://i.pravatar.cc/120?u=${encodeURIComponent(row.email || row.nome || row.id)}`,
     serviceLineStats,
     stats: [
       {
@@ -1669,9 +1673,7 @@ const buildMyBadges = async (accountId) => {
       area: row.area || row.b_nome || 'Badge',
       stateId: 'aprovado',
       status: 'obtido',
-      isSpecial,
-      levelKey: isSpecial ? 'special' : template.levelKey,
-      typeId: isSpecial ? 'special' : (template.levelKey ? `badge_level_${template.levelKey}` : undefined),
+      levelKey: isSpecial ? null : template.levelKey,
       points: Number(row.pontos_obtidos) || template.points,
       badgeImage: resolveBadgeImage(row.imagem, template.badgeImage, isSpecial),
       date: formatDate(row.data_obtencao),
@@ -1718,9 +1720,7 @@ const buildMyBadges = async (accountId) => {
       area: row.area || row.b_nome || 'Badge',
       stateId: mapPedidoEstadoToMyBadgeState(row.estado),
       status: mapPedidoEstadoToMyRequestStatus(row.estado),
-      isSpecial,
-      levelKey: isSpecial ? 'special' : template.levelKey,
-      typeId: isSpecial ? 'special' : (template.levelKey ? `badge_level_${template.levelKey}` : undefined),
+      levelKey: isSpecial ? null : template.levelKey,
       points: Number(row.badge_pontos) > 0 ? Number(row.badge_pontos) : template.points,
       badgeImage: resolveBadgeImage(row.imagem, template.badgeImage, isSpecial),
       date: formatDate(row.data_submissao),
@@ -2746,82 +2746,11 @@ export const consultorModel = {
     if (typeof updates.nome === 'string') {
       fields.nome = updates.nome.trim();
     }
-    if (typeof updates.localizacao === 'string') {
-      fields.localizacao = updates.localizacao.trim();
-    }
     if (Object.keys(fields).length === 0) {
       return { updated: false };
     }
     await Account.update(fields, { where: { id: Number(accountId) } });
     return { updated: true };
-  },
-
-  async getUserVitrine(accountId) {
-    const parsedAccountId = Number(accountId);
-    if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) return [];
-
-    const rows = await sequelize.query(
-      `
-        SELECT v.nbadge, v.ordem, b.b_nome, b.b_descricao, b.pontos, b.imagem, b.validade, t.tipo,
-               n.nivel
-        FROM vitrine AS v
-        INNER JOIN badge AS b ON b.nbadge = v.nbadge
-        LEFT JOIN tipo AS t ON t.ntipo = b.ntipo
-        LEFT JOIN nivel_contem_b ncb ON ncb.nbadge = b.nbadge
-        LEFT JOIN nivel n ON n.nnivel = ncb.nnivel
-        WHERE v.nutilizador = :accountId
-        ORDER BY v.ordem ASC, v.nbadge ASC
-      `,
-      { replacements: { accountId: parsedAccountId }, type: QueryTypes.SELECT },
-    );
-
-    const badgeIds = rows.map((r) => Number(r.nbadge)).filter(Boolean);
-    const imageMap = await loadBadgeImagesBatch(badgeIds);
-
-    return rows.map((row) => {
-      const nbadge = Number(row.nbadge);
-      return {
-        nbadge,
-        ordem: Number(row.ordem) || 0,
-        b_nome: row.b_nome,
-        pontos: Number(row.pontos) || 0,
-        imagem: imageMap[nbadge] || row.imagem || null,
-        validade: row.validade || null,
-        tipo: row.tipo || null,
-        nivel: row.nivel || null,
-      };
-    });
-  },
-
-  async saveUserVitrine(accountId, badgeEntries) {
-    const parsedAccountId = Number(accountId);
-    if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) return [];
-
-    return sequelize.transaction(async (transaction) => {
-      await sequelize.query(
-        'DELETE FROM vitrine WHERE nutilizador = :accountId',
-        { replacements: { accountId: parsedAccountId }, type: QueryTypes.DELETE, transaction },
-      );
-
-      for (const entry of (Array.isArray(badgeEntries) ? badgeEntries : [])) {
-        const badgeId = Number(entry.nbadge);
-        const ordem = Number(entry.ordem) || 0;
-        if (!Number.isInteger(badgeId) || badgeId <= 0) continue;
-
-        await sequelize.query(
-          `INSERT INTO vitrine (nutilizador, nbadge, ordem)
-           VALUES (:accountId, :badgeId, :ordem)
-           ON CONFLICT (nutilizador, nbadge) DO UPDATE SET ordem = EXCLUDED.ordem`,
-          {
-            replacements: { accountId: parsedAccountId, badgeId, ordem },
-            type: QueryTypes.INSERT,
-            transaction,
-          },
-        );
-      }
-
-      return consultorModel.getUserVitrine(parsedAccountId);
-    });
   },
 
   async saveEvidences(accountId, pedidoId, nreq, fileMeta) {

@@ -1,6 +1,5 @@
 import { consultorService } from '../services/consultorService.js';
 import { adminBadgeModel } from '../models/adminBadgeModel.js';
-import { utilizadorImagemModel } from '../models/utilizadorImagemModel.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -355,93 +354,5 @@ export const getExpiringSoonBadgesForUser = async (req, res) => {
     res.status(200).json(badges);
   } catch (error) {
     res.status(500).json({ message: error?.message || 'Failed to fetch expiring badges.' });
-  }
-};
-
-export const getUserImage = async (req, res) => {
-  const accountId = parseAccountId(req.query?.accountId || req.params?.accountId);
-
-  if (!accountId) {
-    res.status(400).json({ message: 'Account id is required.' });
-    return;
-  }
-
-  try {
-    const imageData = await utilizadorImagemModel.loadUserImage(accountId);
-    if (!imageData) {
-      res.status(404).json({ message: 'No image found for this user.' });
-      return;
-    }
-    res.status(200).json({ image: imageData });
-  } catch (error) {
-    res.status(500).json({ message: error?.message || 'Failed to fetch user image.' });
-  }
-};
-
-export const uploadUserImage = async (req, res) => {
-  const accountId = parseAccountId(req.body?.accountId);
-
-  if (!accountId) {
-    res.status(400).json({ message: 'Account id is required.' });
-    return;
-  }
-
-  const imageData = req.body?.image;
-  if (!imageData) {
-    res.status(400).json({ message: 'Image data is required.' });
-    return;
-  }
-
-  try {
-    await utilizadorImagemModel.saveUserImage(accountId, imageData);
-    res.status(200).json({ message: 'User image saved successfully.' });
-  } catch (error) {
-    res.status(500).json({ message: error?.message || 'Failed to save user image.' });
-  }
-};
-
-export const deleteUserImage = async (req, res) => {
-  const accountId = parseAccountId(req.body?.accountId || req.query?.accountId);
-
-  if (!accountId) {
-    res.status(400).json({ message: 'Account id is required.' });
-    return;
-  }
-
-  try {
-    await utilizadorImagemModel.deleteUserImage(accountId);
-    res.status(204).send();
-  } catch (error) {
-    res.status(500).json({ message: error?.message || 'Failed to delete user image.' });
-  }
-};
-
-export const getUserVitrine = async (req, res) => {
-  const accountId = parseAccountId(req.query?.accountId || req.params?.accountId);
-  if (!accountId) {
-    res.status(400).json({ message: 'Account id is required.' });
-    return;
-  }
-
-  try {
-    const data = await consultorService.getUserVitrine(accountId);
-    res.status(200).json(data);
-  } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch vitrine.', error: error.message });
-  }
-};
-
-export const saveUserVitrine = async (req, res) => {
-  const accountId = parseAccountId(req.body?.accountId);
-  if (!accountId) {
-    res.status(400).json({ message: 'accountId is required.' });
-    return;
-  }
-
-  try {
-    const data = await consultorService.saveUserVitrine(accountId, req.body?.badges);
-    res.status(200).json(data);
-  } catch (error) {
-    res.status(500).json({ message: 'Failed to save vitrine.', error: error.message });
   }
 };

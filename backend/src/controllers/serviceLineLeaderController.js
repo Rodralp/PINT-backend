@@ -135,7 +135,8 @@ export const getRankingConsultoresSLL = async (req, res) => {
           u.email,
           COALESCE(pb.points, 0) AS points,
           COALESCE(pb.badges, 0) AS badges,
-          :serviceLineName AS "serviceLine"
+          :serviceLineName AS "serviceLine",
+          'https://i.pravatar.cc/120?u=' || COALESCE(NULLIF(REPLACE(LOWER(u.email), '@', '.'), ''), LOWER(REPLACE(u.nome, ' ', '.'))) AS avatar
         FROM consultores_na_sl csl
         INNER JOIN utilizador u
           ON u.nutilizador = csl.nutilizador
@@ -386,8 +387,8 @@ export const getHistoricoConsultoresSLL = async (req, res) => {
           u.nutilizador AS id,
           u.nome AS name,
           u.email,
+          'https://i.pravatar.cc/120?u=' || COALESCE(NULLIF(REPLACE(LOWER(u.email), '@', '.'), ''), LOWER(REPLACE(u.nome, ' ', '.'))) AS avatar,
           COALESCE(pb.points, 0) AS points,
-          COALESCE(DATE(u.data_registo), CURRENT_DATE) AS "joinedAt",
           CASE
             WHEN LOWER(COALESCE(u.status, '')) IN ('ativo', 'inativo', 'pendente') THEN LOWER(u.status)
             ELSE 'inativo'

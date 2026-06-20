@@ -1,6 +1,5 @@
 import cors from 'cors';
 import express from 'express';
-import { checkToken } from './middleware.js';
 import authRoutes from './routes/authRoutes.js';
 import announcementRoutes from './routes/announcementRoutes.js';
 import adminBadgeRoutes from './routes/adminBadgeRoutes.js';
@@ -18,7 +17,7 @@ import shareRoutes from './routes/shareRoutes.js';
 const app = express();
 
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json());
 
 app.get('/api/health', (_req, res) => {
   res.status(200).json({ status: 'ok' });
@@ -27,9 +26,9 @@ app.get('/api/health', (_req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/announcements', announcementRoutes);
-app.use('/api/admin-gestor/badges', checkToken, adminBadgeRoutes);
-app.use('/api/admin-gestor/learning-paths', checkToken, adminLearningPathRoutes);
-app.use('/api/admin-gestor/general-management', checkToken, adminGeneralManagementRoutes);
+app.use('/api/admin-gestor/badges', adminBadgeRoutes);
+app.use('/api/admin-gestor/learning-paths', adminLearningPathRoutes);
+app.use('/api/admin-gestor/general-management', adminGeneralManagementRoutes);
 app.use('/api/consultor', consultorRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/service-line-leader', serviceLineLeaderRoutes);
