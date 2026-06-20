@@ -1293,7 +1293,7 @@ const _buildProfileDataInner = async (parsedAccountId) => {
       subtitleKey: 'badge_level_specialist',
       accent: 'yellow',
     })),
-    activityItems: activityItems.length > 0 ? activityItems : clone(profileData.activityItems),
+    activityItems: activityItems.length > 0 ? activityItems : [],
     certificationsItems: certificationsItems.length > 0 ? certificationsItems : clone(profileData.certificationsItems || []),
     user: {
       id: Number(row.id),
