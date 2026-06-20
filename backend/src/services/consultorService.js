@@ -76,4 +76,12 @@ export const consultorService = {
   async getBadgeRequirements(badgeId) {
     return consultorModel.getBadgeRequirements(badgeId);
   },
+
+  async getUserVitrine(accountId) {
+    return consultorModel.getUserVitrine(accountId);
+  },
+
+  async saveUserVitrine(accountId, badgeEntries) {
+    return consultorModel.saveUserVitrine(accountId, badgeEntries);
+  },
 };

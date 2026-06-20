@@ -23,6 +23,11 @@ import {
   uploadEvidence,
   getBadgeRequirements,
   getExpiringSoonBadgesForUser,
+  getUserImage,
+  uploadUserImage,
+  deleteUserImage,
+  getUserVitrine,
+  saveUserVitrine,
 } from '../controllers/consultorController.js';
 
 const router = Router();
@@ -72,5 +77,10 @@ router.get('/profile', getProfileData);
 router.put('/profile', updateProfileData);
 router.get('/badge/:badgeId/requirements', getBadgeRequirements);
 router.get('/expiring-soon', getExpiringSoonBadgesForUser);
+router.get('/user-image', getUserImage);
+router.post('/user-image', uploadUserImage);
+router.delete('/user-image', deleteUserImage);
+router.get('/vitrine', getUserVitrine);
+router.post('/vitrine', saveUserVitrine);
 
 export default router;

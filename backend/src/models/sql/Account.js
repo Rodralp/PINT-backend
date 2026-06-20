@@ -1,4 +1,5 @@
 import { DataTypes } from 'sequelize';
+import bcrypt from 'bcrypt';
 import { sequelize } from '../../config/database.js';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -44,6 +45,10 @@ export const Account = sequelize.define(
       allowNull: false,
       defaultValue: 'pendente',
     },
+    localizacao: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
   },
   {
     tableName: 'utilizador',
@@ -55,9 +60,13 @@ export const Account = sequelize.define(
           account.email = account.email.trim().toLowerCase();
         }
       },
-      beforeCreate(account) {
+      async beforeCreate(account) {
         if (typeof account.nome === 'string') {
           account.nome = account.nome.trim();
+        }
+        if (account.senha) {
+          const salt = await bcrypt.genSalt(10);
+          account.senha = await bcrypt.hash(account.senha, salt);
         }
       },
     },

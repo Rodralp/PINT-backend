@@ -69,6 +69,14 @@ CREATE TABLE IF NOT EXISTS badge_imagem (
     atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS utilizador_imagem (
+    nutilizador INTEGER PRIMARY KEY REFERENCES utilizador(nutilizador) ON DELETE CASCADE,
+    mime_type VARCHAR(50) NOT NULL DEFAULT 'image/png',
+    dados BYTEA NOT NULL,
+    criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS b_pertence_a (
     narea INTEGER NOT NULL REFERENCES area(narea),
     nbadge INTEGER NOT NULL REFERENCES badge(nbadge),
@@ -357,6 +365,59 @@ CREATE TABLE IF NOT EXISTS c_obtem_b (
     data_obtencao DATE NOT NULL DEFAULT CURRENT_DATE,
     PRIMARY KEY (nutilizador, nbadge)
 );
+
+-- ============================================================
+-- 10. TABELA DE VITRINE
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS vitrine (
+    nutilizador INTEGER NOT NULL REFERENCES utilizador(nutilizador) ON DELETE CASCADE,
+    nbadge INTEGER NOT NULL REFERENCES badge(nbadge) ON DELETE CASCADE,
+    ordem INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (nutilizador, nbadge)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vitrine_nutilizador ON vitrine(nutilizador);
+
+-- ============================================================
+-- 11. COLUNA LOCALIZACAO
+-- ============================================================
+
+ALTER TABLE utilizador ADD COLUMN IF NOT EXISTS localizacao VARCHAR(255);
+
+-- ============================================================
+-- 12. INDEXES DE PERFORMANCE
+-- ============================================================
+
+CREATE INDEX IF NOT EXISTS idx_pedidos_nutilizador ON pedidos(nutilizador);
+CREATE INDEX IF NOT EXISTS idx_pedidos_nbadge ON pedidos(nbadge);
+CREATE INDEX IF NOT EXISTS idx_pedidos_estado ON pedidos(estado);
+CREATE INDEX IF NOT EXISTS idx_pedidos_data_limite ON pedidos(data_limite) WHERE data_limite IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_c_obtem_b_nutilizador ON c_obtem_b(nutilizador);
+CREATE INDEX IF NOT EXISTS idx_c_obtem_b_nbadge ON c_obtem_b(nbadge);
+CREATE INDEX IF NOT EXISTS idx_c_obtem_b_npedido ON c_obtem_b(npedido);
+CREATE INDEX IF NOT EXISTS idx_evidencias_npedido ON evidencias(npedido);
+CREATE INDEX IF NOT EXISTS idx_evidencias_nreq ON evidencias(nreq);
+CREATE INDEX IF NOT EXISTS idx_requisitos_nbadge ON requisitos(nbadge);
+CREATE INDEX IF NOT EXISTS idx_nivel_contem_b_nbadge ON nivel_contem_b(nbadge);
+CREATE INDEX IF NOT EXISTS idx_b_pertence_sl_nbadge ON b_pertence_sl(nbadge);
+CREATE INDEX IF NOT EXISTS idx_b_pertence_sl_nsline ON b_pertence_sl(nsline);
+CREATE INDEX IF NOT EXISTS idx_b_pertence_a_nbadge ON b_pertence_a(nbadge);
+CREATE INDEX IF NOT EXISTS idx_b_pertence_a_narea ON b_pertence_a(narea);
+CREATE INDEX IF NOT EXISTS idx_b_pertence_lp_nbadge ON b_pertence_lp(nbadge);
+CREATE INDEX IF NOT EXISTS idx_area_nsline ON area(nsline);
+CREATE INDEX IF NOT EXISTS idx_nivel_narea ON nivel(narea);
+CREATE INDEX IF NOT EXISTS idx_service_line_nlpath ON service_line(nlpath);
+CREATE INDEX IF NOT EXISTS idx_notificacao_nutilizador ON notificacao(nutilizador);
+CREATE INDEX IF NOT EXISTS idx_notificacao_lida ON notificacao(lida) WHERE lida = FALSE;
+CREATE INDEX IF NOT EXISTS idx_lembrete_nutilizador ON lembrete(nutilizador);
+CREATE INDEX IF NOT EXISTS idx_preferencias_nutilizador ON preferencias(nutilizador);
+CREATE INDEX IF NOT EXISTS idx_motivo_npedido ON motivo(npedido);
+CREATE INDEX IF NOT EXISTS idx_logs_nutilizador ON logs(nutilizador);
+CREATE INDEX IF NOT EXISTS idx_sll_leader_sl_nsline ON sll_leader_sl(nsline);
+CREATE INDEX IF NOT EXISTS idx_badge_trigger_nbadge ON badge_trigger(nbadge);
+CREATE INDEX IF NOT EXISTS idx_cnu_nutilizador ON config_notificacao_utilizador(nutilizador);
+CREATE INDEX IF NOT EXISTS idx_u_pertence_equipa_nutilizador ON u_pertence_equipa(nutilizador);
 
 -- ============================================================
 -- FIM DO SCRIPT

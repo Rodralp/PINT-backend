@@ -1,4 +1,6 @@
 import { QueryTypes } from 'sequelize';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 import { sequelize } from '../config/database.js';
 import { Account } from './sql/Account.js';
 import { communicationModel } from './communicationModel.js';
@@ -117,7 +119,7 @@ const getAdminUsersBaseQuery = `
     u.email,
     u.permissoes,
     u.status,
-    '2024-01-01' AS joined_at,
+    COALESCE(DATE(u.data_registo), CURRENT_DATE) AS joined_at,
     COALESCE(bs.points, 0) AS points,
     COALESCE(bs.badges, 0) AS badges,
     COALESCE(sl.service_lines, '') AS service_lines
@@ -198,9 +200,22 @@ export const authModel = {
   async login({ email, senha }) {
     const normalizedEmail = normalizeEmail(email);
 
-    const account = await Account.findOne({ where: { email: normalizedEmail, senha } });
+    const account = await Account.findOne({ where: { email: normalizedEmail } });
 
     if (!account) {
+      return { status: 'invalid_credentials' };
+    }
+
+    let passwordMatch = await bcrypt.compare(senha, account.senha);
+
+    if (!passwordMatch && account.senha === senha) {
+      passwordMatch = true;
+      const salt = await bcrypt.genSalt(10);
+      account.senha = await bcrypt.hash(senha, salt);
+      await account.save();
+    }
+
+    if (!passwordMatch) {
       return { status: 'invalid_credentials' };
     }
 
@@ -219,10 +234,18 @@ export const authModel = {
     }
 
     const hasPreferences = await getHasPreferences(account.id);
+    const accountData = sanitizeAccount(account, hasPreferences);
+
+    const roles = normalizeRoleList(account.permissoes);
+    const isAdminGestor = roles.includes('admin-gestor');
+
+    const token = isAdminGestor
+      ? jwt.sign({ id: account.id, email: account.email }, process.env.JWT_SECRET)
+      : jwt.sign({ id: account.id, email: account.email }, process.env.JWT_SECRET, { expiresIn: '1h' });
 
     return {
       status: 'ok',
-      account: sanitizeAccount(account, hasPreferences),
+      account: { ...accountData, token },
     };
   },
 
@@ -251,7 +274,8 @@ export const authModel = {
       throw error;
     }
 
-    if (String(account.senha || '') !== String(currentPassword || '')) {
+    const passwordMatch = await bcrypt.compare(currentPassword, account.senha);
+    if (!passwordMatch) {
       const error = new Error('Current password is invalid.');
       error.statusCode = 400;
       throw error;
@@ -263,7 +287,8 @@ export const authModel = {
       throw error;
     }
 
-    account.senha = String(newPassword || '');
+    const salt = await bcrypt.genSalt(10);
+    account.senha = await bcrypt.hash(newPassword, salt);
     await account.save();
 
     try {
@@ -312,7 +337,7 @@ export const authModel = {
     });
 
     // Filter results in JavaScript to avoid complex SQL WHERE conditions
-    return rows.filter((row) => {
+    const mappedUsers = rows.filter((row) => {
       // Filter by tab (pending or active/inactive)
       const status = row.status?.toLowerCase() || '';
       if (isTabPending) {
@@ -336,6 +361,21 @@ export const authModel = {
 
       return true;
     }).map(mapUserRow);
+
+    // Batch-load avatars
+    const userIds = mappedUsers.map((u) => u.id).filter(Boolean);
+    let avatarMap = {};
+    if (userIds.length > 0) {
+      try {
+        const { utilizadorImagemModel } = await import('./utilizadorImagemModel.js');
+        avatarMap = await utilizadorImagemModel.loadUserImagesBatch(userIds);
+      } catch { /* no images */ }
+    }
+
+    return mappedUsers.map((u) => ({
+      ...u,
+      avatar: avatarMap[u.id] || null,
+    }));
   },
 
   async createAdminUser({ nome, email, senha, roles, serviceLineIds }) {

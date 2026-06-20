@@ -466,11 +466,22 @@ const getManagerDashboardDataFromDb = async (role, accountId) => {
 
 
 
+  let avatarMap = {};
+  try {
+    const { utilizadorImagemModel } = await import('./utilizadorImagemModel.js');
+    const consultorIds = (Array.isArray(topConsultoresRows) ? topConsultoresRows : []).map((r) => Number(r.id)).filter(Boolean);
+    if (consultorIds.length > 0) {
+      avatarMap = await utilizadorImagemModel.loadUserImagesBatch(consultorIds);
+    }
+  } catch { /* no images */ }
+
   const topConsultores = (Array.isArray(topConsultoresRows) ? topConsultoresRows : []).map((row, index) => ({
     id: Number(row.id),
     name: row.name || 'Consultor',
     email: row.email || '',
     iconKey: mapTopConsultorIconKey(index),
+    rank: index + 1,
+    avatar: avatarMap[Number(row.id)] || null,
     points: Number(row.points) || 0,
     badges: Number(row.badges) || 0,
   }));
