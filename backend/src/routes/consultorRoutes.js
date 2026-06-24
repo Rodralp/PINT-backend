@@ -5,7 +5,6 @@ import path from 'node:path';
 import {
   acquireBadge,
   getBadgeSuggestions,
-  getBadgeTypes,
   getPreferenceAreas,
   getPreferences,
   createReminder,
@@ -83,6 +82,5 @@ router.post('/user-image', uploadUserImage);
 router.delete('/user-image', deleteUserImage);
 router.get('/vitrine', getUserVitrine);
 router.post('/vitrine', saveUserVitrine);
-router.get('/badge-types', getBadgeTypes);
 
 export default router;

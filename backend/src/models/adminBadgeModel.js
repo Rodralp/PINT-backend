@@ -102,7 +102,7 @@ const loadBadgeImagesBatch = async (badgeIds, transaction) => {
   const replacements = {};
   badgeIds.forEach((id, i) => { replacements[`id${i}`] = id; });
 
-  const rows = await sequelize.query(
+  const [rows] = await sequelize.query(
     `
       SELECT nbadge, mime_type, dados
       FROM badge_imagem
@@ -519,7 +519,7 @@ const loadBadgeRequirements = async (badgeId, transaction) => {
 
   return (rows || []).map((row) => ({
     id: `req-${Number(row.nreq)}`,
-    title: row.requisito || '',
+    title: row.requisito || 'Requisito',
     description: row.r_descricao || '',
     image: row.imagem || null,
   }));

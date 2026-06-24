@@ -1,10 +1,6 @@
 import { QueryTypes } from 'sequelize';
 import { consultorModel } from './consultorModel.js';
-import { adminBadgeModel } from './adminBadgeModel.js';
 import { sequelize } from '../config/database.js';
-
-const { loadBadgeImagesBatch } = adminBadgeModel;
-const { resolveBadgeImage, resolveBadgeTemplate, isSpecialTypeName } = consultorModel;
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -481,7 +477,7 @@ const getManagerDashboardDataFromDb = async (role, accountId) => {
 
   const topConsultores = (Array.isArray(topConsultoresRows) ? topConsultoresRows : []).map((row, index) => ({
     id: Number(row.id),
-    name: row.name || '',
+    name: row.name || 'Consultor',
     email: row.email || '',
     iconKey: mapTopConsultorIconKey(index),
     rank: index + 1,
@@ -492,7 +488,7 @@ const getManagerDashboardDataFromDb = async (role, accountId) => {
 
   const recentActivities = (Array.isArray(activitiesRows) ? activitiesRows : []).map((row, index) => ({
     id: index + 1,
-    title: row.title || '',
+    title: row.title || 'Atividade recente',
     timeframe: buildTimeframeFromDate(row.activity_date),
     iconKey: row.icon_key || 'fileText',
   }));
@@ -589,24 +585,14 @@ export const dashboardModel = {
           `
             SELECT
               p.npedido,
-              p.nbadge,
               b.b_nome,
-              b.imagem,
               p.data_submissao,
-              COALESCE(e.estado, 'pendente') AS estado,
-              n.nivel,
-              t.tipo
+              COALESCE(e.estado, 'pendente') AS estado
             FROM pedidos AS p
             INNER JOIN badge AS b
               ON b.nbadge = p.nbadge
             LEFT JOIN estado AS e
               ON e.nestado = p.estado
-            LEFT JOIN nivel_contem_b AS ncb
-              ON ncb.nbadge = b.nbadge
-            LEFT JOIN nivel AS n
-              ON n.nnivel = ncb.nnivel
-            LEFT JOIN tipo AS t
-              ON t.ntipo = b.ntipo
             WHERE p.nutilizador = :accountId
               AND LOWER(COALESCE(e.estado, '')) <> 'aprovado'
             ORDER BY p.data_submissao DESC, p.npedido DESC
@@ -647,27 +633,13 @@ export const dashboardModel = {
 
       const timelineValues = buildDailySeries(timelineRows, CONSULTOR_TIMELINE_DAYS);
 
-      const inProgressBadgeIds = (inProgressRows || []).map((r) => Number(r.nbadge)).filter(Boolean);
-      const inProgressImageMap = inProgressBadgeIds.length > 0
-        ? await loadBadgeImagesBatch(inProgressBadgeIds).catch(() => ({}))
-        : {};
-
       const inProgressItems = (inProgressRows || []).map((row) => {
         const estado = normalizeRequestState(row.estado);
-        const badgeId = Number(row.nbadge);
-        const isSpecial = isSpecialTypeName(row.tipo);
-        const template = resolveBadgeTemplate(row.nivel, 0, row.tipo);
-        const resolvedImage = resolveBadgeImage(row.imagem, template.badgeImage, isSpecial);
         return {
-          title: row.b_nome || '',
+          title: row.b_nome || 'Badge',
           subtitle: mapRequestStateToSubtitle(estado),
           accent: estado === 'aprovado' ? 'success' : estado === 'evidencias_insuficientes' ? 'amber' : 'warning',
           iconKey: mapRequestStateToIconKey(estado),
-          badgeDbId: badgeId,
-          badgeImage: inProgressImageMap[badgeId] || resolvedImage,
-          levelKey: isSpecial ? null : template.levelKey,
-          typeId: isSpecial ? 'special' : template.levelKey,
-          isSpecial,
         };
       });
 
@@ -677,11 +649,11 @@ export const dashboardModel = {
 
       const newSpecialBadges = (Array.isArray(newSpecialBadgeRows) ? newSpecialBadgeRows : []).map((row) => ({
         nbadge: Number(row.nbadge),
-        name: row.b_nome || '',
+        name: row.b_nome || 'Badge Especial',
         description: row.b_descricao || '',
         points: Number(row.pontos) || 0,
         image: row.imagem || null,
-        tipo: row.tipo || '',
+        tipo: row.tipo || 'Especial',
         date: row.data_obtencao || null,
       }));
 
