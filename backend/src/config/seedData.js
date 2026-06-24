@@ -603,20 +603,16 @@ const ensureEstadosAndMockData = async (accounts, transaction) => {
     let nbadge = null;
 
     if (!existingCb) {
-      const [existingBadge] = await sequelize.query(`
+      await sequelize.query(`
+          INSERT INTO badge (b_nome, b_descricao, ntipo, pontos)
+          VALUES (:b_nome, :b_descricao, :ntipo, :pontos)
+          ON CONFLICT DO NOTHING
+        `, { replacements: { b_nome, b_descricao, ntipo, pontos }, type: QueryTypes.INSERT, transaction });
+
+      const [foundBadge] = await sequelize.query(`
           SELECT nbadge FROM badge WHERE b_nome = :b_nome LIMIT 1
         `, { replacements: { b_nome }, type: QueryTypes.SELECT, transaction });
-
-      if (existingBadge) {
-        nbadge = Number(existingBadge.nbadge);
-      } else {
-        const [insertedB] = await sequelize.query(`
-            INSERT INTO badge (b_nome, b_descricao, ntipo, pontos)
-            VALUES (:b_nome, :b_descricao, :ntipo, :pontos)
-            RETURNING nbadge
-          `, { replacements: { b_nome, b_descricao, ntipo, pontos }, type: QueryTypes.SELECT, transaction });
-        nbadge = Number(insertedB.nbadge);
-      }
+      nbadge = Number(foundBadge.nbadge);
 
       const [existingNcb] = await sequelize.query(`SELECT 1 FROM nivel_contem_b WHERE nnivel = :nnivel AND nbadge = :nbadge LIMIT 1`,
         { replacements: { nnivel: n.nnivel, nbadge }, type: QueryTypes.SELECT, transaction });
@@ -667,6 +663,14 @@ const ensureEstadosAndMockData = async (accounts, transaction) => {
 
     badgesByNivel[n.nnivel] = nbadge;
   }
+
+  await sequelize.query(`
+    SELECT setval(
+      pg_get_serial_sequence('badge', 'nbadge'),
+      COALESCE((SELECT MAX(nbadge) FROM badge), 1),
+      true
+    )
+  `, { type: QueryTypes.SELECT, transaction });
 
   for (const [typeId, points] of badgePointsByTypeId.entries()) {
     await sequelize.query(
