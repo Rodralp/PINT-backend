@@ -1983,9 +1983,11 @@ const buildBadgeSuggestions = async (accountId, limit = 3) => {
         SELECT DISTINCT ON (b.nbadge)
           b.nbadge,
           b.b_nome,
+          b.imagem,
           a.narea,
           a.area,
-          n.nivel
+          n.nivel,
+          t.tipo
         FROM area AS a
         INNER JOIN nivel AS n
           ON n.narea = a.narea
@@ -1993,6 +1995,8 @@ const buildBadgeSuggestions = async (accountId, limit = 3) => {
           ON ncb.nnivel = n.nnivel
         INNER JOIN badge AS b
           ON b.nbadge = ncb.nbadge
+        LEFT JOIN tipo AS t
+          ON t.ntipo = b.ntipo
         WHERE a.narea IN (:areaIds)
           AND (b.validade IS NULL OR b.validade > CURRENT_DATE)
         ORDER BY b.nbadge ASC
@@ -2078,13 +2082,18 @@ const buildBadgeSuggestions = async (accountId, limit = 3) => {
       continue;
     }
 
-    const template = resolveBadgeTemplate(matchedRow.nivel);
+    const isSpecial = isSpecialTypeName(matchedRow.tipo);
+    const template = resolveBadgeTemplate(matchedRow.nivel, 0, matchedRow.tipo);
     suggestedBadgeIds.add(Number(matchedRow.nbadge));
     suggestions.push({
       title: matchedRow.b_nome || matchedRow.area || area.area || 'Badge',
       subtitleKey: template.levelKey,
       accent: suggestionAccentPalette[index % suggestionAccentPalette.length],
       badgeDbId: Number(matchedRow.nbadge),
+      levelKey: isSpecial ? null : template.levelKey,
+      typeId: isSpecial ? 'special' : template.levelKey,
+      isSpecial,
+      badgeImage: resolveBadgeImage(matchedRow.imagem, template.badgeImage, isSpecial),
     });
   }
 
@@ -2112,15 +2121,28 @@ const buildBadgeSuggestions = async (accountId, limit = 3) => {
           continue;
         }
 
-        const template = resolveBadgeTemplate(row.nivel);
+        const isSpecial = isSpecialTypeName(row.tipo);
+        const template = resolveBadgeTemplate(row.nivel, 0, row.tipo);
         suggestedBadgeIds.add(badgeId);
         suggestions.push({
           title: row.b_nome || row.area || area.area || 'Badge',
           subtitleKey: template.levelKey,
           accent: suggestionAccentPalette[suggestions.length % suggestionAccentPalette.length],
           badgeDbId: badgeId,
+          levelKey: isSpecial ? null : template.levelKey,
+          typeId: isSpecial ? 'special' : template.levelKey,
+          isSpecial,
+          badgeImage: resolveBadgeImage(row.imagem, template.badgeImage, isSpecial),
         });
       }
+    }
+  }
+
+  const badgeIds = suggestions.map((s) => s.badgeDbId).filter(Boolean);
+  const imageMap = await loadBadgeImagesBatch(badgeIds);
+  for (const s of suggestions) {
+    if (imageMap[s.badgeDbId]) {
+      s.badgeImage = imageMap[s.badgeDbId];
     }
   }
 
