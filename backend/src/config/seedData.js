@@ -786,6 +786,76 @@ const ensureEstadosAndMockData = async (accounts, transaction) => {
   }
 };
 
+const badgeRequirementsByLevel = {
+  junior: [
+    { requisito: 'Completar formacao basica', r_descricao: 'Demonstrar conhecimentos fundamentais da area.' },
+    { requisito: 'Participar em 3 projetos', r_descricao: 'Contribuir ativamente em pelo menos 3 projetos da equipa.' },
+    { requisito: 'Avaliacao do mentor', r_descricao: 'Obter avaliacao positiva do mentor atribuido.' },
+  ],
+  intermedio: [
+    { requisito: 'Implementar funcionalidade complexa', r_descricao: 'Desenvolver e entregar uma funcionalidade com complexidade intermedia.' },
+    { requisito: 'Rever codigo de 2 colegas', r_descricao: 'Realizar code review em pelo menos 2 projetos de colegas.' },
+    { requisito: 'Documentar processo tecnico', r_descricao: 'Criar documentacao tecnica para um modulo ou servico.' },
+  ],
+  senior: [
+    { requisito: 'Liderar sprint tecnico', r_descricao: 'Assumir responsabilidade tecnica num sprint completo.' },
+    { requisito: 'Mentorar 2 consultores', r_descricao: 'Acompanhar e orientar 2 consultores junior/intermedios.' },
+    { requisito: 'Apresentar session tech talk', r_descricao: 'Realizar uma apresentacao tecnica para a equipa.' },
+  ],
+  especialista: [
+    { requisito: 'Definir arquitetura de solucao', r_descricao: 'Projetar e documentar a arquitetura de uma solucao enterprise.' },
+    { requisito: 'Resolver incidente critico', r_descricao: 'Diagnosticar e resolver um incidente de producao de alta criticidade.' },
+    { requisito: 'Publicar artigo tecnico interno', r_descricao: 'Escrever e publicar um artigo tecnico na plataforma interna.' },
+  ],
+  lider: [
+    { requisito: 'Criar learning path', r_descricao: 'Desenvolver um percurso de aprendizagem para a equipa.' },
+    { requisito: 'Avaliar 5 consultores', r_descricao: 'Realizar avaliacoes tecnicas formais a pelo menos 5 consultores.' },
+    { requisito: 'Propor melhoria de processo', r_descricao: 'Identificar e propor pelo menos 2 melhorias nos processos da equipa.' },
+  ],
+};
+
+const resolveRequirementLevelKey = (levelTitle) => {
+  const normalized = String(levelTitle || '').trim().toLowerCase();
+  if (normalized.includes('junior')) return 'junior';
+  if (normalized.includes('intermedio') || normalized.includes('interm')) return 'intermedio';
+  if (normalized.includes('senior')) return 'senior';
+  if (normalized.includes('especialista')) return 'especialista';
+  if (normalized.includes('lider')) return 'lider';
+  return 'intermedio';
+};
+
+const seedBadgeRequirements = async (transaction) => {
+  const badges = await sequelize.query(
+    `
+      SELECT b.nbadge, b.b_nome, n.nivel
+      FROM badge b
+      LEFT JOIN nivel_contem_b ncb ON ncb.nbadge = b.nbadge
+      LEFT JOIN nivel n ON n.nnivel = ncb.nnivel
+      ORDER BY b.nbadge ASC
+    `,
+    { type: QueryTypes.SELECT, transaction },
+  );
+
+  for (const badge of badges) {
+    const [existingCount] = await sequelize.query(
+      `SELECT COUNT(*)::int AS cnt FROM requisitos WHERE nbadge = :nbadge`,
+      { replacements: { nbadge: badge.nbadge }, type: QueryTypes.SELECT, transaction },
+    );
+
+    if (existingCount?.cnt > 0) continue;
+
+    const levelKey = resolveRequirementLevelKey(badge.nivel);
+    const requirements = badgeRequirementsByLevel[levelKey] || badgeRequirementsByLevel.intermedio;
+
+    for (const req of requirements) {
+      await sequelize.query(
+        `INSERT INTO requisitos (requisito, r_descricao, nbadge) VALUES (:requisito, :r_descricao, :nbadge)`,
+        { replacements: { requisito: req.requisito, r_descricao: req.r_descricao, nbadge: badge.nbadge }, type: QueryTypes.INSERT, transaction },
+      );
+    }
+  }
+};
+
 const seedServiceLineData = async () => {
   const transaction = await sequelize.transaction();
 
@@ -807,6 +877,7 @@ const seedServiceLineData = async () => {
     await assignServiceLineToEachLeader(accounts, serviceLineIds, transaction);
     
     await ensureEstadosAndMockData(accounts, transaction);
+    await seedBadgeRequirements(transaction);
 
     await transaction.commit();
   } catch (error) {
