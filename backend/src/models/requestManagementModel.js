@@ -70,29 +70,6 @@ const autoRejectExpiredRequests = async () => {
   );
 };
 
-const badgeLevelTemplates = [
-  {
-    points: 100,
-    badgeImage: '/badges/J%C3%BAnior.png',
-  },
-  {
-    points: 150,
-    badgeImage: '/badges/Interm%C3%A9dio.png',
-  },
-  {
-    points: 200,
-    badgeImage: '/badges/S%C3%A9nior.png',
-  },
-  {
-    points: 250,
-    badgeImage: '/badges/Especialista.png',
-  },
-  {
-    points: 300,
-    badgeImage: '/badges/L%C3%ADder%20de%20Conhecimento.png',
-  },
-];
-
 const parseRole = (role) => {
   const normalizedRole = String(role || '').trim().toLowerCase();
   return roleSet.has(normalizedRole) ? normalizedRole : null;
@@ -106,6 +83,34 @@ const normalizeLevelTitle = (value) => {
 
   return withoutPathPrefix.replace(/^nivel\s+/i, '').trim();
 };
+
+const badgeLevelTemplates = [
+  {
+    levelKey: 'badge_level_junior',
+    points: 100,
+    badgeImage: '/badges/J%C3%BAnior.png',
+  },
+  {
+    levelKey: 'badge_level_intermediate',
+    points: 150,
+    badgeImage: '/badges/Interm%C3%A9dio.png',
+  },
+  {
+    levelKey: 'badge_level_senior',
+    points: 200,
+    badgeImage: '/badges/S%C3%A9nior.png',
+  },
+  {
+    levelKey: 'badge_level_specialist',
+    points: 250,
+    badgeImage: '/badges/Especialista.png',
+  },
+  {
+    levelKey: 'badge_level_knowledge_lead',
+    points: 300,
+    badgeImage: '/badges/L%C3%ADder%20de%20Conhecimento.png',
+  },
+];
 
 const resolveLevelTemplate = (levelName) => {
   const normalized = String(levelName || '').trim().toLowerCase();
@@ -296,7 +301,9 @@ const mapRowStatus = (estadoNome, obtido, role) => {
   }
 
   if (isPendingSllState(estadoNome)) {
-    return (role === 'service-line-leader' || role === 'admin-gestor') ? 'validacao' : 'pendente';
+    if (role === 'service-line-leader' || role === 'admin-gestor') return 'validacao';
+    if (role === 'talent-manager') return 'aprovado';
+    return 'pendente';
   }
 
   return 'pendente';

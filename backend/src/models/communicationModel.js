@@ -426,7 +426,7 @@ const insertLogEntry = async ({ actorId, title, message, type, priority, transac
     throw error;
   }
 
-  const trimmedTitle = String(title || '').trim() || 'Notificacao';
+  const trimmedTitle = String(title || '').trim() || '';
   const trimmedMessage = String(message || '').trim();
   const summary = buildSummary(trimmedMessage);
 
@@ -852,7 +852,7 @@ export const communicationModel = {
       summary: row.resumo || buildSummary(row.mensagem || ''),
       priority: Number(row.prioridade) || 2,
       date: row.data_log,
-      author: row.author_name || 'Sistema',
+      author: row.author_name || '',
       authorEmail: row.author_email || '',
       attachments: attachmentsByLog.get(Number(row.id)) || [],
     }));
@@ -894,12 +894,12 @@ export const communicationModel = {
       id: Number(row.id),
       logId: row.log_id ? Number(row.log_id) : null,
       isRead: Boolean(row.lida),
-      title: row.titulo || 'Notificacao',
+      title: row.titulo || '',
       summary: row.resumo || '',
       message: row.mensagem || '',
       type: normalizeLogType(row.tipo_log),
       date: row.data_log,
-      author: row.author_name || 'Sistema',
+      author: row.author_name || '',
     }));
   },
 
