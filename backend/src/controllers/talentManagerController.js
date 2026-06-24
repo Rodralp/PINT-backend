@@ -303,7 +303,23 @@ export const getHistoricoConsultores = async (req, res) => {
       },
     );
 
-    res.status(200).json(rows);
+    const consultores = (Array.isArray(rows) ? rows : []).map((row) => ({
+      ...row,
+      avatar: null,
+    }));
+
+    const avatarIds = consultores.map((c) => c.id).filter(Boolean);
+    if (avatarIds.length > 0) {
+      try {
+        const { utilizadorImagemModel } = await import('../models/utilizadorImagemModel.js');
+        const avatarMap = await utilizadorImagemModel.loadUserImagesBatch(avatarIds);
+        for (const c of consultores) {
+          if (avatarMap[c.id]) c.avatar = avatarMap[c.id];
+        }
+      } catch { /* no images */ }
+    }
+
+    res.status(200).json(consultores);
   } catch (error) {
     res.status(500).json({ message: error?.message || 'Failed to fetch consultores.' });
   }

@@ -18,10 +18,10 @@ export const getShareBadge = async (req, res) => {
       return;
     }
 
-    const badgeName = badge.name || 'Badge';
+    const badgeName = badge.name || '';
     const levelTitle = badge.levelTitle || badge.typeName || '';
     const description = badge.description || `Badge ${levelTitle} - ${badge.points || 0} pontos`;
-    const imageUrl = badge.badgeImage || `${FRONTEND_URL}/badges/Junio.png`;
+    const imageUrl = badge.badgeImage || null;
     const shareUrl = `${FRONTEND_URL}/galeria-publica/badge/${badgeId}`;
 
     const html = `<!doctype html>

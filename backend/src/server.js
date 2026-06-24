@@ -1,5 +1,5 @@
 import app from './app.js';
-import { connectToDatabase, setupExtraTables, syncDatabase } from './config/database.js';
+import { connectToDatabase, syncDatabase, setupExtraTables } from './config/database.js';
 import { applySchema } from './config/schema.js';
 import { seedDatabase } from './config/seedData.js';
 
@@ -14,12 +14,7 @@ const startServer = async () => {
     await applySchema();
     await setupExtraTables();
     await syncDatabase();
-    try {
-      await seedDatabase();
-      console.log('Database seeded successfully');
-    } catch (seedError) {
-      console.error('Seed failed (non-fatal):', seedError.message);
-    }
+    await seedDatabase();
 
     const { requestManagementModel } = await import('./models/requestManagementModel.js');
     setInterval(async () => {

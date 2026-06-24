@@ -32,6 +32,13 @@ const defaultAccounts = [
     role: 'admin-gestor',
     status: 'ativo',
   },
+  {
+    nome: 'Testes',
+    email: 'testes@softinsa.pt',
+    senha: '12345678',
+    role: 'consultor;talent-manager;service-line-leader;admin-gestor',
+    status: 'ativo',
+  },
 ];
 
 const defaultReminders = [
@@ -70,22 +77,17 @@ const defaultServiceLines = [
   {
     name: 'Hybrid Cloud',
     description: 'Foco em arquitetura cloud hibrida, operacao e escalabilidade.',
-    areas: ['Cloud Architecture', 'Application Operations'],
+    areas: ['LowCode (Outsystems)'],
   },
   {
-    name: 'Data & AI',
-    description: 'Foco em dados, analitica avancada e modelos de IA.',
-    areas: ['Data Engineering', 'Machine Learning'],
+    name: 'Application Operations',
+    description: 'Foco em operacoes de aplicacoes, DevSecOps e automacao.',
+    areas: ['DevSecOps & IT Automation'],
   },
   {
-    name: 'Cybersecurity',
-    description: 'Foco em seguranca aplicacional, identidade e resposta a incidentes.',
-    areas: ['Secure Development', 'Threat Detection'],
-  },
-  {
-    name: 'Testing',
-    description: 'Foco em testes manuais e automatizados, quality assurance e performance.',
-    areas: ['Quality Assurance', 'Test Automation'],
+    name: 'Sourcing & Talent Management',
+    description: 'Foco em recrutamento, gestao de talento e desenvolvimento de carreiras.',
+    areas: ['Sourcing & Talent Management'],
   },
 ];
 
@@ -102,26 +104,36 @@ const defaultBadgeTypes = [
     ntipo: 1,
     tipo: 'Nível Júnior',
     matchers: ['junior'],
+    pontos: 100,
+    levelKey: 'badge_level_junior',
   },
   {
     ntipo: 2,
     tipo: 'Nível Intermédio',
     matchers: ['intermedio', 'interm'],
+    pontos: 150,
+    levelKey: 'badge_level_intermediate',
   },
   {
     ntipo: 3,
     tipo: 'Nível Sénior',
     matchers: ['senior'],
+    pontos: 200,
+    levelKey: 'badge_level_senior',
   },
   {
     ntipo: 4,
     tipo: 'Nível Especialista',
     matchers: ['especialista'],
+    pontos: 250,
+    levelKey: 'badge_level_specialist',
   },
   {
     ntipo: 5,
     tipo: 'Nível Lider de Conhecimento',
     matchers: ['lider de conhecimento', 'lider'],
+    pontos: 300,
+    levelKey: 'badge_level_knowledge_lead',
   },
 ];
 
@@ -145,7 +157,7 @@ const buildSimpleBadgeName = (areaName) =>
   String(areaName || 'Badge')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 25) || 'Badge';
+    .slice(0, 50) || 'Badge';
 
 const buildSimpleBadgeDescription = (areaName) =>
   `Badge da area ${buildSimpleBadgeName(areaName)}.`;
@@ -383,7 +395,7 @@ const ensureUtilizadorForAccounts = async (accounts, transaction) => {
 
 const assignServiceLineToEachLeader = async (accounts, serviceLineIds, transaction) => {
   const leaderAccounts = accounts.filter(isServiceLineLeader);
-  const globalAccessUserIds = new Set([5]);
+  const globalAccessUserIds = new Set();
 
   if (leaderAccounts.length === 0 || serviceLineIds.length === 0) {
     return;
@@ -516,11 +528,11 @@ const ensureBadgeTypes = async (transaction) => {
     await sequelize.query(
       `
         UPDATE tipo
-        SET tipo = :tipo
+        SET tipo = :tipo, pontos = :pontos, level_key = :levelKey
         WHERE ntipo = :ntipo
       `,
       {
-        replacements: { ntipo: badgeType.ntipo, tipo: badgeType.tipo },
+        replacements: { ntipo: badgeType.ntipo, tipo: badgeType.tipo, pontos: badgeType.pontos, levelKey: badgeType.levelKey },
         type: QueryTypes.UPDATE,
         transaction,
       },
@@ -646,8 +658,6 @@ const ensureEstadosAndMockData = async (accounts, transaction) => {
     normalizeRoles(account.role).includes('consultor'),
   );
 
-  const untouchedServiceLine = 'Testing';
-
   for (const account of consultorAccounts) {
     const utilizadorId = account.id;
     if (!utilizadorId) {
@@ -655,10 +665,6 @@ const ensureEstadosAndMockData = async (accounts, transaction) => {
     }
 
     for (const n of niveis) {
-      if (n.sline === untouchedServiceLine) {
-        continue;
-      }
-
       const nbadge = badgesByNivel[n.nnivel];
       if (!nbadge) {
         continue;
