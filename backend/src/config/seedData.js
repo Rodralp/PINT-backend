@@ -603,19 +603,48 @@ const ensureEstadosAndMockData = async (accounts, transaction) => {
     let nbadge = null;
 
     if (!existingCb) {
-      const [insertedB] = await sequelize.query(`
-          INSERT INTO badge (b_nome, b_descricao, ntipo, pontos)
-          VALUES (:b_nome, :b_descricao, :ntipo, :pontos)
-          RETURNING nbadge
-        `, { replacements: { b_nome, b_descricao, ntipo, pontos }, type: QueryTypes.SELECT, transaction });
-      nbadge = Number(insertedB.nbadge);
+      const [existingBadge] = await sequelize.query(`
+          SELECT nbadge FROM badge WHERE b_nome = :b_nome LIMIT 1
+        `, { replacements: { b_nome }, type: QueryTypes.SELECT, transaction });
 
-      await sequelize.query(`INSERT INTO nivel_contem_b (nnivel, nbadge) VALUES (:nnivel, :nbadge)`,
-        { replacements: { nnivel: n.nnivel, nbadge }, type: QueryTypes.INSERT, transaction });
-      
-      await sequelize.query(`INSERT INTO b_pertence_a (narea, nbadge) VALUES (:narea, :nbadge)`, { replacements: { narea: n.narea, nbadge }, type: QueryTypes.INSERT, transaction });
-      await sequelize.query(`INSERT INTO b_pertence_sl (nsline, nbadge) VALUES (:nsline, :nbadge)`, { replacements: { nsline: n.nsline, nbadge }, type: QueryTypes.INSERT, transaction });
-      await sequelize.query(`INSERT INTO b_pertence_lp (nlpath, nbadge) VALUES (:nlpath, :nbadge)`, { replacements: { nlpath: n.nlpath, nbadge }, type: QueryTypes.INSERT, transaction });
+      if (existingBadge) {
+        nbadge = Number(existingBadge.nbadge);
+      } else {
+        const [insertedB] = await sequelize.query(`
+            INSERT INTO badge (b_nome, b_descricao, ntipo, pontos)
+            VALUES (:b_nome, :b_descricao, :ntipo, :pontos)
+            RETURNING nbadge
+          `, { replacements: { b_nome, b_descricao, ntipo, pontos }, type: QueryTypes.SELECT, transaction });
+        nbadge = Number(insertedB.nbadge);
+      }
+
+      const [existingNcb] = await sequelize.query(`SELECT 1 FROM nivel_contem_b WHERE nnivel = :nnivel AND nbadge = :nbadge LIMIT 1`,
+        { replacements: { nnivel: n.nnivel, nbadge }, type: QueryTypes.SELECT, transaction });
+      if (!existingNcb) {
+        await sequelize.query(`INSERT INTO nivel_contem_b (nnivel, nbadge) VALUES (:nnivel, :nbadge)`,
+          { replacements: { nnivel: n.nnivel, nbadge }, type: QueryTypes.INSERT, transaction });
+      }
+
+      const [existingPertenceA] = await sequelize.query(`SELECT 1 FROM b_pertence_a WHERE narea = :narea AND nbadge = :nbadge LIMIT 1`,
+        { replacements: { narea: n.narea, nbadge }, type: QueryTypes.SELECT, transaction });
+      if (!existingPertenceA) {
+        await sequelize.query(`INSERT INTO b_pertence_a (narea, nbadge) VALUES (:narea, :nbadge)`,
+          { replacements: { narea: n.narea, nbadge }, type: QueryTypes.INSERT, transaction });
+      }
+
+      const [existingPertenceSl] = await sequelize.query(`SELECT 1 FROM b_pertence_sl WHERE nsline = :nsline AND nbadge = :nbadge LIMIT 1`,
+        { replacements: { nsline: n.nsline, nbadge }, type: QueryTypes.SELECT, transaction });
+      if (!existingPertenceSl) {
+        await sequelize.query(`INSERT INTO b_pertence_sl (nsline, nbadge) VALUES (:nsline, :nbadge)`,
+          { replacements: { nsline: n.nsline, nbadge }, type: QueryTypes.INSERT, transaction });
+      }
+
+      const [existingPertenceLp] = await sequelize.query(`SELECT 1 FROM b_pertence_lp WHERE nlpath = :nlpath AND nbadge = :nbadge LIMIT 1`,
+        { replacements: { nlpath: n.nlpath, nbadge }, type: QueryTypes.SELECT, transaction });
+      if (!existingPertenceLp) {
+        await sequelize.query(`INSERT INTO b_pertence_lp (nlpath, nbadge) VALUES (:nlpath, :nbadge)`,
+          { replacements: { nlpath: n.nlpath, nbadge }, type: QueryTypes.INSERT, transaction });
+      }
     } else {
       nbadge = Number(existingCb.nbadge);
     }
