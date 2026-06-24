@@ -1,73 +1,70 @@
 import { QueryTypes } from 'sequelize';
 import { sequelize } from '../config/database.js';
 
-const parseDataUrl = (dataUrl) => {
-  const match = String(dataUrl || '').match(/^data:([^;]+);base64,(.+)$/);
-  if (!match) return null;
-  return { mimeType: match[1], base64: match[2] };
-};
+const saveUserImage = async (accountId, imageDataOrMimeType, maybeBase64Data) => {
+  let mimeType = 'image/png';
+  let base64Data;
 
-const saveUserImage = async (utilizadorId, imageDataUrl, transaction) => {
-  if (!utilizadorId || !imageDataUrl) return;
+  if (maybeBase64Data !== undefined) {
+    mimeType = imageDataOrMimeType;
+    base64Data = maybeBase64Data;
+  } else if (typeof imageDataOrMimeType === 'string' && imageDataOrMimeType.startsWith('data:')) {
+    const match = imageDataOrMimeType.match(/^data:([^;]+);base64,(.+)$/);
+    if (match) {
+      mimeType = match[1];
+      base64Data = match[2];
+    } else {
+      base64Data = imageDataOrMimeType;
+    }
+  } else {
+    base64Data = imageDataOrMimeType;
+  }
 
-  const parsed = parseDataUrl(imageDataUrl);
-  if (!parsed) return;
-
-  const binaryBuffer = Buffer.from(parsed.base64, 'base64');
-
+  const buffer = Buffer.from(base64Data, 'base64');
   await sequelize.query(
     `
-      INSERT INTO utilizador_imagem (nutilizador, mime_type, dados, atualizado_em)
-      VALUES (:utilizadorId, :mimeType, :dados, CURRENT_TIMESTAMP)
+      INSERT INTO utilizador_imagem (nutilizador, mime_type, dados, criado_em, atualizado_em)
+      VALUES (:accountId, :mimeType, :dados, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       ON CONFLICT (nutilizador) DO UPDATE
-        SET mime_type = EXCLUDED.mime_type,
-            dados = EXCLUDED.dados,
+        SET mime_type = :mimeType,
+            dados = :dados,
             atualizado_em = CURRENT_TIMESTAMP
     `,
     {
-      replacements: {
-        utilizadorId,
-        mimeType: parsed.mimeType,
-        dados: binaryBuffer,
-      },
-      type: QueryTypes.INSERT,
-      transaction,
+      replacements: { accountId, mimeType, dados: buffer },
     },
   );
 };
 
-const loadUserImage = async (utilizadorId, transaction) => {
-  const options = transaction ? { transaction } : {};
+const getUserImage = async (accountId) => {
   const [row] = await sequelize.query(
     `
       SELECT mime_type, dados
       FROM utilizador_imagem
-      WHERE nutilizador = :utilizadorId
+      WHERE nutilizador = :accountId
       LIMIT 1
     `,
     {
-      replacements: { utilizadorId },
+      replacements: { accountId },
       type: QueryTypes.SELECT,
-      ...options,
     },
   );
 
-  if (!row?.dados) return null;
+  if (!row || !row.dados) return null;
 
   const base64 = Buffer.isBuffer(row.dados)
     ? row.dados.toString('base64')
     : Buffer.from(row.dados).toString('base64');
 
-  return `data:${row.mime_type};base64,${base64}`;
+  return { mimeType: row.mime_type || 'image/png', dataUrl: `data:${row.mime_type};base64,${base64}` };
 };
 
-const loadUserImagesBatch = async (utilizadorIds, transaction) => {
-  if (!utilizadorIds || utilizadorIds.length === 0) return {};
+const loadUserImagesBatch = async (accountIds) => {
+  if (!accountIds || accountIds.length === 0) return {};
 
-  const options = transaction ? { transaction } : {};
-  const placeholders = utilizadorIds.map((_, i) => `:id${i}`).join(', ');
+  const placeholders = accountIds.map((_, i) => `:id${i}`).join(', ');
   const replacements = {};
-  utilizadorIds.forEach((id, i) => { replacements[`id${i}`] = id; });
+  accountIds.forEach((id, i) => { replacements[`id${i}`] = id; });
 
   const rows = await sequelize.query(
     `
@@ -75,40 +72,30 @@ const loadUserImagesBatch = async (utilizadorIds, transaction) => {
       FROM utilizador_imagem
       WHERE nutilizador IN (${placeholders})
     `,
-    {
-      replacements,
-      type: QueryTypes.SELECT,
-      ...options,
-    },
+    { replacements, type: QueryTypes.SELECT },
   );
 
-  const imageMap = {};
-  for (const row of (Array.isArray(rows) ? rows : [])) {
+  const map = {};
+  for (const row of rows) {
     const base64 = Buffer.isBuffer(row.dados)
       ? row.dados.toString('base64')
       : Buffer.from(row.dados).toString('base64');
-    imageMap[row.nutilizador] = `data:${row.mime_type};base64,${base64}`;
+    map[row.nutilizador] = `data:${row.mime_type};base64,${base64}`;
   }
-
-  return imageMap;
+  return map;
 };
 
-const deleteUserImage = async (utilizadorId, transaction) => {
-  if (!utilizadorId) return;
-  const options = transaction ? { transaction } : {};
+const deleteUserImage = async (accountId) => {
   await sequelize.query(
-    `DELETE FROM utilizador_imagem WHERE nutilizador = :utilizadorId`,
-    {
-      replacements: { utilizadorId },
-      type: QueryTypes.DELETE,
-      ...options,
-    },
+    'DELETE FROM utilizador_imagem WHERE nutilizador = :accountId',
+    { replacements: { accountId } },
   );
 };
 
 export const utilizadorImagemModel = {
   saveUserImage,
-  loadUserImage,
+  getUserImage,
+  loadUserImage: getUserImage,
   loadUserImagesBatch,
   deleteUserImage,
 };

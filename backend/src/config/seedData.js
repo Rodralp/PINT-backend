@@ -32,13 +32,6 @@ const defaultAccounts = [
     role: 'admin-gestor',
     status: 'ativo',
   },
-  {
-    nome: 'Testes',
-    email: 'testes@softinsa.pt',
-    senha: '12345678',
-    role: 'consultor;talent-manager;service-line-leader;admin-gestor',
-    status: 'ativo',
-  },
 ];
 
 const defaultReminders = [
@@ -77,17 +70,22 @@ const defaultServiceLines = [
   {
     name: 'Hybrid Cloud',
     description: 'Foco em arquitetura cloud hibrida, operacao e escalabilidade.',
-    areas: ['LowCode (Outsystems)'],
+    areas: ['Cloud Architecture', 'Application Operations'],
   },
   {
-    name: 'Application Operations',
-    description: 'Foco em operacoes de aplicacoes, DevSecOps e automacao.',
-    areas: ['DevSecOps & IT Automation'],
+    name: 'Data & AI',
+    description: 'Foco em dados, analitica avancada e modelos de IA.',
+    areas: ['Data Engineering', 'Machine Learning'],
   },
   {
-    name: 'Sourcing & Talent Management',
-    description: 'Foco em recrutamento, gestao de talento e desenvolvimento de carreiras.',
-    areas: ['Sourcing & Talent Management'],
+    name: 'Cybersecurity',
+    description: 'Foco em seguranca aplicacional, identidade e resposta a incidentes.',
+    areas: ['Secure Development', 'Threat Detection'],
+  },
+  {
+    name: 'Testing',
+    description: 'Foco em testes manuais e automatizados, quality assurance e performance.',
+    areas: ['Quality Assurance', 'Test Automation'],
   },
 ];
 
@@ -104,36 +102,26 @@ const defaultBadgeTypes = [
     ntipo: 1,
     tipo: 'Nível Júnior',
     matchers: ['junior'],
-    pontos: 100,
-    levelKey: 'badge_level_junior',
   },
   {
     ntipo: 2,
     tipo: 'Nível Intermédio',
     matchers: ['intermedio', 'interm'],
-    pontos: 150,
-    levelKey: 'badge_level_intermediate',
   },
   {
     ntipo: 3,
     tipo: 'Nível Sénior',
     matchers: ['senior'],
-    pontos: 200,
-    levelKey: 'badge_level_senior',
   },
   {
     ntipo: 4,
     tipo: 'Nível Especialista',
     matchers: ['especialista'],
-    pontos: 250,
-    levelKey: 'badge_level_specialist',
   },
   {
     ntipo: 5,
     tipo: 'Nível Lider de Conhecimento',
     matchers: ['lider de conhecimento', 'lider'],
-    pontos: 300,
-    levelKey: 'badge_level_knowledge_lead',
   },
 ];
 
@@ -157,7 +145,7 @@ const buildSimpleBadgeName = (areaName) =>
   String(areaName || 'Badge')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 50) || 'Badge';
+    .slice(0, 25) || 'Badge';
 
 const buildSimpleBadgeDescription = (areaName) =>
   `Badge da area ${buildSimpleBadgeName(areaName)}.`;
@@ -395,7 +383,7 @@ const ensureUtilizadorForAccounts = async (accounts, transaction) => {
 
 const assignServiceLineToEachLeader = async (accounts, serviceLineIds, transaction) => {
   const leaderAccounts = accounts.filter(isServiceLineLeader);
-  const globalAccessUserIds = new Set();
+  const globalAccessUserIds = new Set([5]);
 
   if (leaderAccounts.length === 0 || serviceLineIds.length === 0) {
     return;
@@ -528,11 +516,11 @@ const ensureBadgeTypes = async (transaction) => {
     await sequelize.query(
       `
         UPDATE tipo
-        SET tipo = :tipo, pontos = :pontos, level_key = :levelKey
+        SET tipo = :tipo
         WHERE ntipo = :ntipo
       `,
       {
-        replacements: { ntipo: badgeType.ntipo, tipo: badgeType.tipo, pontos: badgeType.pontos, levelKey: badgeType.levelKey },
+        replacements: { ntipo: badgeType.ntipo, tipo: badgeType.tipo },
         type: QueryTypes.UPDATE,
         transaction,
       },
@@ -603,44 +591,19 @@ const ensureEstadosAndMockData = async (accounts, transaction) => {
     let nbadge = null;
 
     if (!existingCb) {
-      await sequelize.query(`
+      const [insertedB] = await sequelize.query(`
           INSERT INTO badge (b_nome, b_descricao, ntipo, pontos)
           VALUES (:b_nome, :b_descricao, :ntipo, :pontos)
-          ON CONFLICT DO NOTHING
-        `, { replacements: { b_nome, b_descricao, ntipo, pontos }, type: QueryTypes.INSERT, transaction });
+          RETURNING nbadge
+        `, { replacements: { b_nome, b_descricao, ntipo, pontos }, type: QueryTypes.SELECT, transaction });
+      nbadge = Number(insertedB.nbadge);
 
-      const [foundBadge] = await sequelize.query(`
-          SELECT nbadge FROM badge WHERE b_nome = :b_nome LIMIT 1
-        `, { replacements: { b_nome }, type: QueryTypes.SELECT, transaction });
-      nbadge = Number(foundBadge.nbadge);
-
-      const [existingNcb] = await sequelize.query(`SELECT 1 FROM nivel_contem_b WHERE nnivel = :nnivel AND nbadge = :nbadge LIMIT 1`,
-        { replacements: { nnivel: n.nnivel, nbadge }, type: QueryTypes.SELECT, transaction });
-      if (!existingNcb) {
-        await sequelize.query(`INSERT INTO nivel_contem_b (nnivel, nbadge) VALUES (:nnivel, :nbadge)`,
-          { replacements: { nnivel: n.nnivel, nbadge }, type: QueryTypes.INSERT, transaction });
-      }
-
-      const [existingPertenceA] = await sequelize.query(`SELECT 1 FROM b_pertence_a WHERE narea = :narea AND nbadge = :nbadge LIMIT 1`,
-        { replacements: { narea: n.narea, nbadge }, type: QueryTypes.SELECT, transaction });
-      if (!existingPertenceA) {
-        await sequelize.query(`INSERT INTO b_pertence_a (narea, nbadge) VALUES (:narea, :nbadge)`,
-          { replacements: { narea: n.narea, nbadge }, type: QueryTypes.INSERT, transaction });
-      }
-
-      const [existingPertenceSl] = await sequelize.query(`SELECT 1 FROM b_pertence_sl WHERE nsline = :nsline AND nbadge = :nbadge LIMIT 1`,
-        { replacements: { nsline: n.nsline, nbadge }, type: QueryTypes.SELECT, transaction });
-      if (!existingPertenceSl) {
-        await sequelize.query(`INSERT INTO b_pertence_sl (nsline, nbadge) VALUES (:nsline, :nbadge)`,
-          { replacements: { nsline: n.nsline, nbadge }, type: QueryTypes.INSERT, transaction });
-      }
-
-      const [existingPertenceLp] = await sequelize.query(`SELECT 1 FROM b_pertence_lp WHERE nlpath = :nlpath AND nbadge = :nbadge LIMIT 1`,
-        { replacements: { nlpath: n.nlpath, nbadge }, type: QueryTypes.SELECT, transaction });
-      if (!existingPertenceLp) {
-        await sequelize.query(`INSERT INTO b_pertence_lp (nlpath, nbadge) VALUES (:nlpath, :nbadge)`,
-          { replacements: { nlpath: n.nlpath, nbadge }, type: QueryTypes.INSERT, transaction });
-      }
+      await sequelize.query(`INSERT INTO nivel_contem_b (nnivel, nbadge) VALUES (:nnivel, :nbadge)`,
+        { replacements: { nnivel: n.nnivel, nbadge }, type: QueryTypes.INSERT, transaction });
+      
+      await sequelize.query(`INSERT INTO b_pertence_a (narea, nbadge) VALUES (:narea, :nbadge)`, { replacements: { narea: n.narea, nbadge }, type: QueryTypes.INSERT, transaction });
+      await sequelize.query(`INSERT INTO b_pertence_sl (nsline, nbadge) VALUES (:nsline, :nbadge)`, { replacements: { nsline: n.nsline, nbadge }, type: QueryTypes.INSERT, transaction });
+      await sequelize.query(`INSERT INTO b_pertence_lp (nlpath, nbadge) VALUES (:nlpath, :nbadge)`, { replacements: { nlpath: n.nlpath, nbadge }, type: QueryTypes.INSERT, transaction });
     } else {
       nbadge = Number(existingCb.nbadge);
     }
@@ -664,14 +627,6 @@ const ensureEstadosAndMockData = async (accounts, transaction) => {
     badgesByNivel[n.nnivel] = nbadge;
   }
 
-  await sequelize.query(`
-    SELECT setval(
-      pg_get_serial_sequence('badge', 'nbadge'),
-      COALESCE((SELECT MAX(nbadge) FROM badge), 1),
-      true
-    )
-  `, { type: QueryTypes.SELECT, transaction });
-
   for (const [typeId, points] of badgePointsByTypeId.entries()) {
     await sequelize.query(
       `
@@ -691,6 +646,8 @@ const ensureEstadosAndMockData = async (accounts, transaction) => {
     normalizeRoles(account.role).includes('consultor'),
   );
 
+  const untouchedServiceLine = 'Testing';
+
   for (const account of consultorAccounts) {
     const utilizadorId = account.id;
     if (!utilizadorId) {
@@ -698,6 +655,10 @@ const ensureEstadosAndMockData = async (accounts, transaction) => {
     }
 
     for (const n of niveis) {
+      if (n.sline === untouchedServiceLine) {
+        continue;
+      }
+
       const nbadge = badgesByNivel[n.nnivel];
       if (!nbadge) {
         continue;

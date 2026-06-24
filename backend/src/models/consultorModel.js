@@ -1247,7 +1247,8 @@ const _buildProfileDataInner = async (parsedAccountId) => {
   let avatar = null;
   try {
     const { utilizadorImagemModel } = await import('./utilizadorImagemModel.js');
-    avatar = await utilizadorImagemModel.loadUserImage(parsedAccountId);
+    const imageResult = await utilizadorImagemModel.loadUserImage(parsedAccountId);
+    avatar = imageResult?.dataUrl || null;
   } catch { /* no image */ }
 
   return {
@@ -1292,7 +1293,7 @@ const _buildProfileDataInner = async (parsedAccountId) => {
       subtitleKey: 'badge_level_specialist',
       accent: 'yellow',
     })),
-    activityItems: activityItems.length > 0 ? activityItems : clone(profileData.activityItems),
+    activityItems: activityItems.length > 0 ? activityItems : [],
     certificationsItems: certificationsItems.length > 0 ? certificationsItems : clone(profileData.certificationsItems || []),
     user: {
       id: Number(row.id),
@@ -1982,8 +1983,6 @@ const buildBadgeSuggestions = async (accountId, limit = 3) => {
         SELECT DISTINCT ON (b.nbadge)
           b.nbadge,
           b.b_nome,
-          b.imagem,
-          t.tipo,
           a.narea,
           a.area,
           n.nivel
@@ -1994,8 +1993,6 @@ const buildBadgeSuggestions = async (accountId, limit = 3) => {
           ON ncb.nnivel = n.nnivel
         INNER JOIN badge AS b
           ON b.nbadge = ncb.nbadge
-        LEFT JOIN tipo AS t
-          ON t.ntipo = b.ntipo
         WHERE a.narea IN (:areaIds)
           AND (b.validade IS NULL OR b.validade > CURRENT_DATE)
         ORDER BY b.nbadge ASC
@@ -2053,7 +2050,7 @@ const buildBadgeSuggestions = async (accountId, limit = 3) => {
     rows.sort((left, right) => {
       const leftTemplate = resolveBadgeTemplate(left.nivel);
       const rightTemplate = resolveBadgeTemplate(right.nivel);
-      return leftTemplate.points - rightTemplate.points;
+      return rightTemplate.points - leftTemplate.points;
     });
   }
 
@@ -2074,10 +2071,7 @@ const buildBadgeSuggestions = async (accountId, limit = 3) => {
       }
 
       const latestRequestStatus = requestStatusByBadge.get(badgeId);
-      if (latestRequestStatus === 'pendente-tm' || latestRequestStatus === 'pendente-sll') {
-        return false;
-      }
-      return true;
+      return !hasActiveBadgeRequest(latestRequestStatus);
     });
 
     if (!matchedRow) {
@@ -2085,25 +2079,50 @@ const buildBadgeSuggestions = async (accountId, limit = 3) => {
     }
 
     const template = resolveBadgeTemplate(matchedRow.nivel);
-    const isSpecialType = isSpecialTypeName(matchedRow.tipo);
     suggestedBadgeIds.add(Number(matchedRow.nbadge));
     suggestions.push({
       title: matchedRow.b_nome || matchedRow.area || area.area || 'Badge',
       subtitleKey: template.levelKey,
       accent: suggestionAccentPalette[index % suggestionAccentPalette.length],
       badgeDbId: Number(matchedRow.nbadge),
-      badgeImage: resolveBadgeImage(matchedRow.imagem, template.badgeImage, isSpecialType),
-      levelKey: isSpecialType ? null : template.levelKey,
-      typeId: isSpecialType ? 'special' : template.levelKey,
-      isSpecial: isSpecialType,
     });
   }
 
-  suggestions.sort((left, right) => {
-    const leftPoints = resolveBadgeTemplate(left.levelKey).points;
-    const rightPoints = resolveBadgeTemplate(right.levelKey).points;
-    return leftPoints - rightPoints;
-  });
+  if (suggestions.length < safeLimit) {
+    for (let areaIndex = 0; areaIndex < preferredAreas.length; areaIndex += 1) {
+      if (suggestions.length >= safeLimit) {
+        break;
+      }
+
+      const area = preferredAreas[areaIndex];
+      const areaRows = candidateRowsByArea.get(Number(area.narea)) || [];
+
+      for (const row of areaRows) {
+        if (suggestions.length >= safeLimit) {
+          break;
+        }
+
+        const badgeId = Number(row.nbadge);
+        if (suggestedBadgeIds.has(badgeId) || obtainedBadgeIds.has(badgeId)) {
+          continue;
+        }
+
+        const latestRequestStatus = requestStatusByBadge.get(badgeId);
+        if (hasActiveBadgeRequest(latestRequestStatus)) {
+          continue;
+        }
+
+        const template = resolveBadgeTemplate(row.nivel);
+        suggestedBadgeIds.add(badgeId);
+        suggestions.push({
+          title: row.b_nome || row.area || area.area || 'Badge',
+          subtitleKey: template.levelKey,
+          accent: suggestionAccentPalette[suggestions.length % suggestionAccentPalette.length],
+          badgeDbId: badgeId,
+        });
+      }
+    }
+  }
 
   return suggestions;
 };
@@ -2555,7 +2574,7 @@ const getPedidoDetail = async (accountId, pedidoId) => {
 };
 
 export const consultorModel = {
-  async getCatalogBadges(includeExpired = false, accountId = null) {
+  async getCatalogBadges(includeExpired = false) {
     try { await adminBadgeModel.checkAndExpireBadges(); } catch (e) { console.error('Error checking expired badges:', e); }
     const whereClause = includeExpired ? '' : 'WHERE b.validade IS NULL OR b.validade > CURRENT_DATE';
     const rawBadges = await sequelize.query(
@@ -2589,76 +2608,21 @@ export const consultorModel = {
       { type: QueryTypes.SELECT }
     );
 
-    let userObtainedMap = new Map();
-    let userRequestMap = new Map();
-
-    if (accountId) {
-      const utilizadorId = Number(accountId);
-      const [obtainedRows, requestRows] = await Promise.all([
-        sequelize.query(
-          `
-            SELECT cb.nbadge
-            FROM c_obtem_b AS cb
-            INNER JOIN badge AS b ON b.nbadge = cb.nbadge
-            WHERE cb.nutilizador = :utilizadorId
-              AND (b.validade IS NULL OR b.validade > CURRENT_DATE)
-          `,
-          { replacements: { utilizadorId }, type: QueryTypes.SELECT }
-        ),
-        sequelize.query(
-          `
-            SELECT DISTINCT ON (p.nbadge)
-              p.nbadge,
-              e.estado
-            FROM pedidos AS p
-            INNER JOIN estado AS e ON e.nestado = p.estado
-            INNER JOIN badge AS b ON b.nbadge = p.nbadge
-            WHERE p.nutilizador = :utilizadorId
-              AND (b.validade IS NULL OR b.validade > CURRENT_DATE)
-            ORDER BY p.nbadge, p.data_submissao DESC, p.npedido DESC
-          `,
-          { replacements: { utilizadorId }, type: QueryTypes.SELECT }
-        ),
-      ]);
-
-      for (const row of obtainedRows) {
-        userObtainedMap.set(Number(row.nbadge), true);
-      }
-      for (const row of requestRows) {
-        userRequestMap.set(Number(row.nbadge), row.estado);
-      }
-    }
-
     const items = rawBadges.map((row) => {
       const isSpecial = isSpecialTypeName(row.tipo);
       const template = resolveBadgeTemplate(row.nivel, 0, row.tipo);
       const resolvedPoints = Number(row.pontos) > 0 ? Number(row.pontos) : template.points;
       const name = row.b_nome || row.area || 'Badge';
-      const badgeId = Number(row.nbadge);
-
-      let stateId = 'candidatura_aberta';
-      let status = 'visualizar';
-
-      if (accountId) {
-        if (userObtainedMap.has(badgeId)) {
-          stateId = 'aprovado';
-          status = 'obtido';
-        } else if (userRequestMap.has(badgeId)) {
-          const estado = userRequestMap.get(badgeId);
-          stateId = mapPedidoEstadoToMyBadgeState(estado);
-          status = mapPedidoEstadoToMyRequestStatus(estado);
-        }
-      }
 
       return {
         id: `badge-${row.nbadge}`,
-        badgeDbId: badgeId,
+        badgeDbId: Number(row.nbadge),
         levelId: row.nnivel ? Number(row.nnivel) : null,
         area: row.area || row.b_nome || 'Diversos',
         name,
         description: row.b_descricao || '',
-        stateId,
-        status,
+        stateId: 'candidatura_aberta',
+        status: 'visualizar',
         levelKey: isSpecial ? null : template.levelKey,
         typeId: isSpecial ? 'special' : template.levelKey,
         isSpecial,
@@ -2714,15 +2678,6 @@ export const consultorModel = {
 
   async getBadgeSuggestions(accountId, limit) {
     const data = await buildBadgeSuggestions(accountId, limit);
-    const badgeIds = data.map((s) => s.badgeDbId).filter((id) => id > 0);
-    if (badgeIds.length > 0) {
-      const imageMap = await loadBadgeImagesBatch(badgeIds).catch(() => ({}));
-      for (const item of data) {
-        if (imageMap[item.badgeDbId]) {
-          item.badgeImage = imageMap[item.badgeDbId];
-        }
-      }
-    }
     return clone(data);
   },
 
@@ -2931,7 +2886,4 @@ export const consultorModel = {
   },
 
   sendAllExpirationNotifications,
-  resolveBadgeImage,
-  resolveBadgeTemplate,
-  isSpecialTypeName,
 };
