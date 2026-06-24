@@ -32,37 +32,49 @@ export const connectToDatabase = async () => {
 };
 
 export const setupExtraTables = async () => {
-  await sequelize.query(`
-    CREATE TABLE IF NOT EXISTS badge_expiracao_log (
-      nlog_expiracao INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-      nbadge INTEGER NOT NULL REFERENCES badge(nbadge) ON DELETE CASCADE,
-      data_expiracao DATE NOT NULL,
-      data_processamento TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      pedidos_rejeitados INTEGER DEFAULT 0,
-      nivel_desativado BOOLEAN DEFAULT FALSE,
-      CONSTRAINT unique_badge_expiracao UNIQUE (nbadge, data_expiracao)
-    );
-  `);
+  try {
+    await sequelize.query(`
+      CREATE TABLE IF NOT EXISTS badge_expiracao_log (
+        nlog_expiracao INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        nbadge INTEGER NOT NULL REFERENCES badge(nbadge) ON DELETE CASCADE,
+        data_expiracao DATE NOT NULL,
+        data_processamento TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        pedidos_rejeitados INTEGER DEFAULT 0,
+        nivel_desativado BOOLEAN DEFAULT FALSE,
+        CONSTRAINT unique_badge_expiracao UNIQUE (nbadge, data_expiracao)
+      );
+    `);
+  } catch {
+    // badge_expiracao_log table already exists or badge table not ready
+  }
 
-  await sequelize.query(`
-    CREATE TABLE IF NOT EXISTS badge_imagem (
-      nbadge INTEGER PRIMARY KEY REFERENCES badge(nbadge) ON DELETE CASCADE,
-      mime_type VARCHAR(50) NOT NULL DEFAULT 'image/png',
-      dados BYTEA NOT NULL,
-      criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
+  try {
+    await sequelize.query(`
+      CREATE TABLE IF NOT EXISTS badge_imagem (
+        nbadge INTEGER PRIMARY KEY REFERENCES badge(nbadge) ON DELETE CASCADE,
+        mime_type VARCHAR(50) NOT NULL DEFAULT 'image/png',
+        dados BYTEA NOT NULL,
+        criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch {
+    // badge_imagem table already exists or badge table not ready
+  }
 
-  await sequelize.query(`
-    CREATE TABLE IF NOT EXISTS utilizador_imagem (
-      nutilizador INTEGER PRIMARY KEY REFERENCES utilizador(nutilizador) ON DELETE CASCADE,
-      mime_type VARCHAR(50) NOT NULL DEFAULT 'image/png',
-      dados BYTEA NOT NULL,
-      criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
+  try {
+    await sequelize.query(`
+      CREATE TABLE IF NOT EXISTS utilizador_imagem (
+        nutilizador INTEGER PRIMARY KEY REFERENCES utilizador(nutilizador) ON DELETE CASCADE,
+        mime_type VARCHAR(50) NOT NULL DEFAULT 'image/png',
+        dados BYTEA NOT NULL,
+        criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        atualizado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch {
+    // utilizador_imagem table already exists or utilizador table not ready
+  }
 
   try {
     await sequelize.query(`
