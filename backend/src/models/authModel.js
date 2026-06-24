@@ -256,7 +256,7 @@ export const authModel = {
 
   async recoverPassword(email) {
     const account = await this.findByEmail(email);
-    return account ? account.senha : null;
+    return account ? true : null;
   },
 
   async changePassword({ accountId, currentPassword, newPassword }) {

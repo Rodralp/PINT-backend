@@ -788,7 +788,9 @@ export const seedDatabase = async () => {
   const [accountsCount, remindersCount] = await Promise.all([Account.count(), Reminder.count()]);
 
   if (accountsCount === 0) {
-    await Account.bulkCreate(defaultAccounts);
+    for (const accountData of defaultAccounts) {
+      await Account.create(accountData);
+    }
   }
 
   const orderedAccounts = await Account.findAll({ order: [['id', 'ASC']] });

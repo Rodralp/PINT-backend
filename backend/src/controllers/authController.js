@@ -82,13 +82,13 @@ export const recoverPassword = async (req, res) => {
   }
 
   try {
-    const password = await authService.recoverPassword(email);
-    if (!password) {
+    const exists = await authService.recoverPassword(email);
+    if (!exists) {
       res.status(404).json({ message: 'Email not found.' });
       return;
     }
 
-    res.status(200).json({ password });
+    res.status(200).json({ message: 'Password recovery email sent.' });
   } catch {
     res.status(500).json({ message: 'Failed to recover password.' });
   }
