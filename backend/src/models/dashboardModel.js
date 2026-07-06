@@ -8,6 +8,54 @@ const { resolveBadgeImage, resolveBadgeTemplate, isSpecialTypeName } = consultor
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
+const countConsultorsByServiceLineScope = async (scope, countAllUsers = false) => {
+  if (!scope.hasServiceLineScope) {
+    if (countAllUsers) {
+      const [rows] = await sequelize.query(
+        `SELECT COUNT(*)::int AS total FROM utilizador AS u WHERE LOWER(COALESCE(u.status, '')) = 'ativo'`,
+        { type: QueryTypes.SELECT },
+      );
+      return Number(rows?.total) || 0;
+    }
+    const [rows] = await sequelize.query(
+      `SELECT COUNT(*)::int AS total FROM utilizador AS u WHERE LOWER(COALESCE(u.status, '')) = 'ativo' AND LOWER(COALESCE(u.permissoes, '')) LIKE '%consultor%'`,
+      { type: QueryTypes.SELECT },
+    );
+    return Number(rows?.total) || 0;
+  }
+
+  const badgeRows = await sequelize.query(
+    `SELECT bps.nbadge FROM b_pertence_sl AS bps WHERE bps.nsline IN (:serviceLineIds)`,
+    { replacements: { serviceLineIds: scope.serviceLineIds }, type: QueryTypes.SELECT },
+  );
+  const badgeIds = badgeRows.map((b) => b.nbadge).filter(Boolean);
+  if (badgeIds.length === 0) return 0;
+
+  const [obtainedRows, requestedRows] = await Promise.all([
+    sequelize.query(
+      `SELECT DISTINCT cb.nutilizador FROM c_obtem_b AS cb WHERE cb.nbadge IN (:badgeIds)`,
+      { replacements: { badgeIds }, type: QueryTypes.SELECT },
+    ),
+    sequelize.query(
+      `SELECT DISTINCT p.nutilizador FROM pedidos AS p WHERE p.nbadge IN (:badgeIds)`,
+      { replacements: { badgeIds }, type: QueryTypes.SELECT },
+    ),
+  ]);
+
+  const consultorIds = [...new Set([
+    ...obtainedRows.map((c) => c.nutilizador),
+    ...requestedRows.map((c) => c.nutilizador),
+  ])].filter((id) => id > 0);
+
+  if (consultorIds.length === 0) return 0;
+
+  const [rows] = await sequelize.query(
+    `SELECT COUNT(*)::int AS total FROM utilizador AS u WHERE u.nutilizador IN (:consultorIds) AND LOWER(COALESCE(u.status, '')) = 'ativo' AND LOWER(COALESCE(u.permissoes, '')) LIKE '%consultor%'`,
+    { replacements: { consultorIds }, type: QueryTypes.SELECT },
+  );
+  return Number(rows?.total) || 0;
+};
+
 // Ensure data_registo column exists in utilizador table
 const ensureDataRegistoColumn = async () => {
   try {
@@ -48,7 +96,7 @@ const managerRoleSet = new Set(['talent-manager', 'service-line-leader', 'admin-
 const defaultManagerDashboard = Object.freeze({
   badgesTimelineValues: Array.from({ length: MANAGER_BADGES_TIMELINE_DAYS }, () => 0),
   novosConsultoresValues: Array.from({ length: MANAGER_NEW_CONSULTORES_DAYS }, () => 0),
-  onlineUsers: 0,
+  consultoresCount: 0,
   pendingRequests: 0,
   topConsultores: [],
   recentActivities: [],
@@ -259,7 +307,7 @@ const getManagerDashboardDataFromDb = async (role, accountId) => {
 
 
 
-  const [badgesTimelineRows, novosConsultoresRows, onlineUsersRows, pendingRequestsRows, topConsultoresRows, activitiesRows] = await Promise.all([
+  const [badgesTimelineRows, novosConsultoresRows, consultoresCountRows, pendingRequestsRows, topConsultoresRows, activitiesRows] = await Promise.all([
     sequelize.query(
       `
         WITH latest AS (
@@ -313,16 +361,7 @@ const getManagerDashboardDataFromDb = async (role, accountId) => {
         type: QueryTypes.SELECT,
       },
     ),
-    sequelize.query(
-      `
-        SELECT COUNT(*)::int AS total
-        FROM utilizador AS u
-        WHERE LOWER(COALESCE(u.status, '')) = 'ativo'
-      `,
-      {
-        type: QueryTypes.SELECT,
-      },
-    ),
+    countConsultorsByServiceLineScope(scope, role === 'admin-gestor').then((total) => [{ total }]),
     sequelize.query(
       `
         WITH latest AS (
@@ -500,7 +539,7 @@ const getManagerDashboardDataFromDb = async (role, accountId) => {
   const result = {
     badgesTimelineValues: buildDailySeries(badgesTimelineRows, MANAGER_BADGES_TIMELINE_DAYS),
     novosConsultoresValues: buildDailySeries(novosConsultoresRows, MANAGER_NEW_CONSULTORES_DAYS),
-    onlineUsers: Number(onlineUsersRows?.[0]?.total) || 0,
+    consultoresCount: Number(consultoresCountRows?.[0]?.total) || 0,
     pendingRequests: Number(pendingRequestsRows?.[0]?.total) || 0,
     topConsultores,
     recentActivities,
