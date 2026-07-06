@@ -4,6 +4,7 @@ import {
 	createAdminUser,
 	decidePendingUser,
 	listAdminUsers,
+	listRgpdTopics,
 	listServiceLines,
 	login,
 	recoverPassword,
@@ -18,6 +19,7 @@ router.post('/register', register);
 router.post('/login', login);
 router.post('/recover-password', recoverPassword);
 router.post('/change-password', changePassword);
+router.get('/rgpd-topics', listRgpdTopics);
 router.get('/admin/service-lines', listServiceLines);
 router.get('/admin/users', listAdminUsers);
 router.post('/admin/users', createAdminUser);

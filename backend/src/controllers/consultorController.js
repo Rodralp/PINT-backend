@@ -275,6 +275,10 @@ export const deleteReminder = async (req, res) => {
 export const getProfileData = async (req, res) => {
   const accountId = parseAccountId(req.query?.accountId);
 
+  if (!accountId) {
+    return res.status(400).json({ message: 'accountId is required.' });
+  }
+
   try {
     const data = await consultorService.getProfileData(accountId);
     res.status(200).json(data);

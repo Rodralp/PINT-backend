@@ -1,5 +1,6 @@
 import { authService } from '../services/authService.js';
 import { UniqueConstraintError, ValidationError } from 'sequelize';
+import { RgpdTopico } from '../models/sql/RgpdTopico.js';
 
 export const register = async (req, res) => {
   const { nome, email, senha } = req.body ?? {};
@@ -207,5 +208,24 @@ export const decidePendingUser = async (req, res) => {
   } catch (error) {
     const statusCode = Number(error?.statusCode) || 500;
     res.status(statusCode).json({ message: error?.message || 'Failed to process decision.' });
+  }
+};
+
+export const listRgpdTopics = async (_req, res) => {
+  try {
+    const rows = await RgpdTopico.findAll({
+      order: [['ordem', 'ASC'], ['nrgpd', 'ASC']],
+    });
+
+    const topics = (rows || []).map((row) => ({
+      id: Number(row?.nrgpd),
+      title: row?.titulo || '',
+      body: row?.corpo || '',
+      order: Number(row?.ordem) || 0,
+    }));
+
+    res.status(200).json(topics);
+  } catch (error) {
+    res.status(500).json({ message: error?.message || 'Failed to fetch RGPD topics.' });
   }
 };
