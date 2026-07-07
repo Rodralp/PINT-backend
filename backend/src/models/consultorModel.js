@@ -1017,15 +1017,10 @@ const buildProfileData = async (accountId) => {
   const parsedAccountId = Number(accountId);
 
   if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) {
-    return clone(profileData);
+    throw new Error('Invalid accountId');
   }
 
-  try {
-    return await _buildProfileDataInner(parsedAccountId);
-  } catch (error) {
-    console.error('❌ buildProfileData error, returning defaults:', error.message);
-    return clone(profileData);
-  }
+  return _buildProfileDataInner(parsedAccountId);
 };
 
 const _buildProfileDataInner = async (parsedAccountId) => {
@@ -1100,7 +1095,7 @@ const _buildProfileDataInner = async (parsedAccountId) => {
   );
 
   if (!row) {
-    return clone(profileData);
+    throw new Error('User not found');
   }
   // compute per-service-line aggregates for this user (badges and points)
   let serviceLineStats = [];

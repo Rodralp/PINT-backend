@@ -118,6 +118,27 @@ export const serviceLineLeaderModel = {
         ),
       );
 
+      const nivelBadgeRows = levels.length > 0
+        ? normalizeRows(
+            await sequelize.query(
+              `
+                SELECT nnivel, nbadge
+                FROM nivel_contem_b
+                WHERE nnivel IN (:levelIds)
+              `,
+              {
+                replacements: { levelIds: levels.map((l) => l.nnivel) },
+                type: QueryTypes.SELECT,
+              },
+            ),
+          )
+        : [];
+
+      const badgeMap = new Map();
+      for (const row of nivelBadgeRows) {
+        badgeMap.set(row.nnivel, row.nbadge);
+      }
+
       const levelsByArea = levels.reduce((accumulator, level) => {
         const key = Number(level.narea);
         if (!accumulator[key]) {
@@ -136,6 +157,7 @@ export const serviceLineLeaderModel = {
           levelKey: template.levelKey,
           points: template.points,
           badgeImage: template.badgeImage,
+          badgeDbId: badgeMap.get(level.nnivel) || null,
           status: 'visualizar',
         });
 

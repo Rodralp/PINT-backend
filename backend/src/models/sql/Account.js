@@ -49,6 +49,12 @@ export const Account = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
+    dataRegisto: {
+      type: DataTypes.DATEONLY,
+      allowNull: false,
+      defaultValue: DataTypes.NOW,
+      field: 'data_registo',
+    },
   },
   {
     tableName: 'utilizador',

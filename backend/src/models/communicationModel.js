@@ -114,9 +114,9 @@ const eventNotificationDefaults = [
   },
   {
     event: 'Badge a expirar',
-    admin: true,
-    sll: true,
-    tl: true,
+    admin: false,
+    sll: false,
+    tl: false,
     consultor: true,
     email: false,
     webApp: true,
