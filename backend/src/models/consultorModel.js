@@ -727,6 +727,8 @@ const autoRejectExpiredRequests = async () => {
   );
 };
 
+const EXPIRATION_NOTIFICATION_THRESHOLD_DAYS = Number(globalThis.process?.env?.EXPIRATION_NOTIFICATION_THRESHOLD_DAYS) || 30;
+
 const sendAllExpirationNotifications = async () => {
   try {
     const expiringBadges = await adminBadgeModel.getExpiringSoonBadges(EXPIRATION_NOTIFICATION_THRESHOLD_DAYS);
