@@ -11,6 +11,7 @@ import { Evidencia } from './sql/Evidencia.js';
 import { Motivo } from './sql/Motivo.js';
 import { Tipo } from './sql/Tipo.js';
 import { Vitrine } from './sql/Vitrine.js';
+import { Preferencia } from './sql/Preferencia.js';
 import { Nivel } from './sql/Nivel.js';
 import { NivelContemBadge } from './sql/NivelContemBadge.js';
 import { PedidoHistorico } from './sql/PedidoHistorico.js';
