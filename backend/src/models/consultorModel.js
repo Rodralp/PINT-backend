@@ -1,6 +1,19 @@
-import { QueryTypes } from 'sequelize';
+import { QueryTypes, Op } from 'sequelize';
 import { Reminder } from './sql/Reminder.js';
 import { Account } from './sql/Account.js';
+import { Badge } from './sql/Badge.js';
+import { BadgeTrigger } from './sql/BadgeTrigger.js';
+import { CObtemBadge } from './sql/CObtemBadge.js';
+import { Pedido } from './sql/Pedido.js';
+import { Estado } from './sql/Estado.js';
+import { Requisito } from './sql/Requisito.js';
+import { Evidencia } from './sql/Evidencia.js';
+import { Motivo } from './sql/Motivo.js';
+import { Tipo } from './sql/Tipo.js';
+import { Vitrine } from './sql/Vitrine.js';
+import { Nivel } from './sql/Nivel.js';
+import { NivelContemBadge } from './sql/NivelContemBadge.js';
+import { PedidoHistorico } from './sql/PedidoHistorico.js';
 import { sequelize } from '../config/database.js';
 import { adminBadgeModel } from './adminBadgeModel.js';
 const { loadBadgeImagesBatch } = adminBadgeModel;
@@ -344,21 +357,12 @@ const loadSpecialRequirementsByBadgeIds = async (badgeIds) => {
     return requirementsByBadge;
   }
 
-  const rows = await sequelize.query(
-    `
-      SELECT
-        bt.nbadge,
-        bt.trigger_tipo,
-        bt.trigger_valor
-      FROM badge_trigger AS bt
-      WHERE bt.nbadge IN (:badgeIds)
-      ORDER BY bt.nbadge ASC, bt.trigger_tipo ASC
-    `,
-    {
-      replacements: { badgeIds: normalizedBadgeIds },
-      type: QueryTypes.SELECT,
-    },
-  );
+  const rows = await BadgeTrigger.findAll({
+    where: { nbadge: { [Op.in]: normalizedBadgeIds } },
+    attributes: ['nbadge', 'trigger_tipo', 'trigger_valor'],
+    order: [['nbadge', 'ASC'], ['trigger_tipo', 'ASC']],
+    raw: true,
+  });
 
   for (const row of rows) {
     const badgeId = Number(row.nbadge);
@@ -590,6 +594,14 @@ export const syncSpecialBadgesForConsultor = async (utilizadorId) => {
           continue;
         }
 
+        await PedidoHistorico.create({
+          npedido: requestId,
+          nestado: approvedEstadoId,
+          nutilizador: Number(utilizadorId),
+          data_estado: new Date(),
+          descricao: 'Badge especial atribuída automaticamente por trigger.',
+        }, { transaction });
+
         await sequelize.query(
           `
             INSERT INTO c_obtem_b (nutilizador, nbadge, npedido, pontos_obtidos, data_obtencao)
@@ -619,54 +631,38 @@ export const syncSpecialBadgesForConsultor = async (utilizadorId) => {
   });
 };
 
-const getUtilizadorIdByAccountId = async (accountId) => {
-  const [utilizador] = await sequelize.query(
-    `
-      SELECT nutilizador
-      FROM utilizador
-      WHERE nutilizador = :accountId
-      LIMIT 1
-    `,
-    {
-      replacements: { accountId: Number(accountId) },
-      type: QueryTypes.SELECT,
+export const syncSpecialBadgesForAllConsultors = async () => {
+  const consultorRows = await Account.findAll({
+    where: {
+      status: 'ativo',
+      permissoes: { [Op.iLike]: '%consultor%' },
     },
-  );
+    attributes: ['id'],
+    raw: true,
+  });
 
-  return utilizador?.nutilizador ? Number(utilizador.nutilizador) : null;
+  const ids = consultorRows.map((r) => Number(r.id)).filter((id) => Number.isInteger(id) && id > 0);
+
+  for (const id of ids) {
+    try {
+      await syncSpecialBadgesForConsultor(id);
+    } catch (error) {
+      console.error('Failed to sync special badges for consultor', id, error);
+    }
+  }
+};
+
+const getUtilizadorIdByAccountId = async (accountId) => {
+  const user = await Account.findByPk(Number(accountId), { attributes: ['id'] });
+  return user?.id ? Number(user.id) : null;
 };
 
 const ensureEstadoId = async (estadoNome) => {
-  const [existing] = await sequelize.query(
-    `
-      SELECT nestado
-      FROM estado
-      WHERE LOWER(estado) = LOWER(:estadoNome)
-      LIMIT 1
-    `,
-    {
-      replacements: { estadoNome },
-      type: QueryTypes.SELECT,
-    },
-  );
-
-  if (existing?.nestado) {
-    return Number(existing.nestado);
-  }
-
-  const [inserted] = await sequelize.query(
-    `
-      INSERT INTO estado (estado)
-      VALUES (:estadoNome)
-      RETURNING nestado
-    `,
-    {
-      replacements: { estadoNome },
-      type: QueryTypes.SELECT,
-    },
-  );
-
-  return Number(inserted.nestado);
+  const [estado] = await Estado.findOrCreate({
+    where: sequelize.where(sequelize.fn('LOWER', sequelize.col('estado')), estadoNome.toLowerCase()),
+    defaults: { estado: estadoNome },
+  });
+  return Number(estado.nestado);
 };
 
 const REQUEST_EXPIRATION_MONTHS = 3;
@@ -711,9 +707,25 @@ const autoRejectExpiredRequests = async () => {
       type: QueryTypes.UPDATE,
     },
   );
-};
 
-const EXPIRATION_NOTIFICATION_THRESHOLD_DAYS = 30;
+  await sequelize.query(
+    `
+      INSERT INTO pedido_historico (npedido, nestado, nutilizador, data_estado, descricao)
+      SELECT npedido, :rejectedId, NULL, NOW(), :defaultDescription
+      FROM pedidos
+      WHERE data_limite IS NOT NULL
+        AND data_limite <= CURRENT_DATE
+        AND estado = :rejectedId
+    `,
+    {
+      replacements: {
+        rejectedId,
+        defaultDescription: AUTO_REJECTION_NOTE,
+      },
+      type: QueryTypes.INSERT,
+    },
+  );
+};
 
 const sendAllExpirationNotifications = async () => {
   try {
@@ -725,16 +737,18 @@ const sendAllExpirationNotifications = async () => {
 
     const notifiedSet = new Set();
 
-    const adminRows = await sequelize.query(
-      `SELECT nutilizador AS id FROM utilizador WHERE LOWER(status) = 'ativo' AND LOWER(permissoes) LIKE '%admin-gestor%'`,
-      { type: QueryTypes.SELECT },
-    );
+    const adminRows = await Account.findAll({
+      where: { status: 'ativo', permissoes: { [Op.iLike]: '%admin-gestor%' } },
+      attributes: ['id'],
+      raw: true,
+    });
     const adminIds = adminRows.map((r) => Number(r.id)).filter((id) => Number.isInteger(id) && id > 0);
 
-    const tmRows = await sequelize.query(
-      `SELECT nutilizador AS id FROM utilizador WHERE LOWER(status) = 'ativo' AND LOWER(permissoes) LIKE '%talent-manager%'`,
-      { type: QueryTypes.SELECT },
-    );
+    const tmRows = await Account.findAll({
+      where: { status: 'ativo', permissoes: { [Op.iLike]: '%talent-manager%' } },
+      attributes: ['id'],
+      raw: true,
+    });
     const tmIds = tmRows.map((r) => Number(r.id)).filter((id) => Number.isInteger(id) && id > 0);
 
     for (const badge of expiringBadges) {
@@ -834,18 +848,12 @@ const loadRequirementsByBadgeIds = async (badgeIds) => {
     return requirementsByBadge;
   }
 
-  const rows = await sequelize.query(
-    `
-      SELECT nbadge, nreq, requisito, r_descricao, imagem
-      FROM requisitos
-      WHERE nbadge IN (:badgeIds)
-      ORDER BY nbadge ASC, nreq ASC
-    `,
-    {
-      replacements: { badgeIds: normalizedBadgeIds },
-      type: QueryTypes.SELECT,
-    },
-  );
+  const rows = await Requisito.findAll({
+    where: { nbadge: { [Op.in]: normalizedBadgeIds } },
+    attributes: ['nbadge', 'nreq', 'requisito', 'r_descricao', 'imagem'],
+    order: [['nbadge', 'ASC'], ['nreq', 'ASC']],
+    raw: true,
+  });
 
   for (const row of rows) {
     const badgeId = Number(row.nbadge);
@@ -1097,7 +1105,6 @@ const _buildProfileDataInner = async (parsedAccountId) => {
   if (!row) {
     throw new Error('User not found');
   }
-  // compute per-service-line aggregates for this user (badges and points)
   let serviceLineStats = [];
   try {
     const serviceLineRows = await sequelize.query(
@@ -1131,7 +1138,6 @@ const _buildProfileDataInner = async (parsedAccountId) => {
     console.error('Profile: failed to load service line stats:', e.message);
   }
 
-  // Build a lightweight certifications list from recently obtained badges
   let certificationsItems = [];
   try {
     const certRows = await sequelize.query(
@@ -1163,7 +1169,6 @@ const _buildProfileDataInner = async (parsedAccountId) => {
       const template = typeof resolveBadgeTemplate === 'function'
         ? resolveBadgeTemplate(r.nivel, 0, r.tipo)
         : { levelKey: 'badge_level_specialist' };
-
       return {
         title: r.b_nome || r.nivel || 'Badge',
         levelKey: template.levelKey || 'badge_level_specialist',
@@ -1173,26 +1178,15 @@ const _buildProfileDataInner = async (parsedAccountId) => {
     console.error('Profile: failed to load certifications:', e.message);
   }
 
-  // Fetch request count for this user
   let requestCount = 0;
   try {
-    const requestCountRows = await sequelize.query(
-      `
-        SELECT COUNT(DISTINCT p.npedido) AS request_count
-        FROM pedidos AS p
-        WHERE p.nutilizador = :accountId
-      `,
-      {
-        replacements: { accountId: parsedAccountId },
-        type: QueryTypes.SELECT,
-      },
-    );
-    requestCount = Number(requestCountRows[0]?.request_count) || 0;
+    requestCount = await Pedido.count({
+      where: { nutilizador: parsedAccountId },
+    });
   } catch (e) {
     console.error('Profile: failed to count requests:', e.message);
   }
 
-  // Fetch recent activity from pedidos and logs
   let activityItems = [];
   try {
     const activityRows = await sequelize.query(
@@ -1307,7 +1301,7 @@ const _buildProfileDataInner = async (parsedAccountId) => {
       subtitleKey: 'badge_level_specialist',
       accent: 'yellow',
     })),
-    activityItems: activityItems.length > 0 ? activityItems : clone(profileData.activityItems),
+    activityItems: activityItems.length > 0 ? activityItems : [],
     certificationsItems: certificationsItems.length > 0 ? certificationsItems : clone(profileData.certificationsItems || []),
     user: {
       id: Number(row.id),
@@ -1366,31 +1360,19 @@ const buildLearningPaths = async (accountId) => {
   const utilizadorId = accountId ? await getUtilizadorIdByAccountId(accountId) : null;
   if (utilizadorId) {
     const [loadedBadges, loadedRequests] = await Promise.all([
-      sequelize.query(
-        `
-          SELECT nbadge
-          FROM c_obtem_b
-          WHERE nutilizador = :utilizadorId
-        `,
-        {
-          replacements: { utilizadorId },
-          type: QueryTypes.SELECT,
-        },
-      ),
-      sequelize.query(
-        `
-          SELECT p.npedido, p.nbadge, e.estado
-          FROM pedidos AS p
-          INNER JOIN estado AS e
-            ON e.nestado = p.estado
-          WHERE p.nutilizador = :utilizadorId
-          ORDER BY p.data_submissao DESC, p.npedido DESC
-        `,
-        {
-          replacements: { utilizadorId },
-          type: QueryTypes.SELECT,
-        },
-      ),
+      CObtemBadge.findAll({
+        where: { nutilizador: utilizadorId },
+        attributes: ['nbadge'],
+        raw: true,
+      }),
+      Pedido.findAll({
+        where: { nutilizador: utilizadorId },
+        include: [{ model: Estado, as: 'estadoInfo', attributes: ['estado'] }],
+        attributes: ['npedido', 'nbadge'],
+        order: [['data_submissao', 'DESC'], ['npedido', 'DESC']],
+        raw: true,
+        nest: true,
+      }),
     ]);
 
     userBadges = loadedBadges;
@@ -1403,7 +1385,7 @@ const buildLearningPaths = async (accountId) => {
     const badgeId = Number(r.nbadge);
     if (!requestMetadataByBadge.has(badgeId)) {
       requestMetadataByBadge.set(badgeId, {
-        status: mapPedidoEstadoToLearningPathStatus(r.estado),
+        status: mapPedidoEstadoToLearningPathStatus(r?.estadoInfo?.estado),
         requestId: Number(r.npedido) || null,
       });
     }
@@ -1719,47 +1701,38 @@ const buildMyBadges = async (accountId) => {
       requirement.attachments = requirementEvidence.attachments;
     }
 
-    if (badgeRequirements.length > 0 && requestEvidence?.unscoped?.length) {
-      const firstRequirement = badgeRequirements[0];
-      firstRequirement.files = Number(firstRequirement.files || 0) + requestEvidence.unscoped.length;
-      firstRequirement.attachments = [...(firstRequirement.attachments || []), ...requestEvidence.unscoped];
-    }
+    const mappedMyBadgeState = mapPedidoEstadoToMyBadgeState(row.estado);
+    const mappedMyRequestStatus = mapPedidoEstadoToMyRequestStatus(row.estado);
 
     items.push({
-      id: `badge-${badgeId}`,
+      id: `badge-${badgeId}-${requestId}`,
       badgeDbId: badgeId,
-      requestId,
       name: row.b_nome || row.area || 'Badge',
       area: row.area || row.b_nome || 'Badge',
-      stateId: mapPedidoEstadoToMyBadgeState(row.estado),
-      status: mapPedidoEstadoToMyRequestStatus(row.estado),
+      stateId: row.estado,
+      status: mappedMyBadgeState,
+      requestStatus: mappedMyRequestStatus,
       isSpecial,
       levelKey: isSpecial ? 'special' : template.levelKey,
       typeId: isSpecial ? 'special' : (template.levelKey ? `badge_level_${template.levelKey}` : undefined),
-      points: Number(row.badge_pontos) > 0 ? Number(row.badge_pontos) : template.points,
+      points: Number(row.badge_pontos) || template.points,
       badgeImage: resolveBadgeImage(row.imagem, template.badgeImage, isSpecial),
       date: formatDate(row.data_submissao),
-      requirements: badgeRequirements,
-      evidence: badgeRequirements,
       validade: row.validade || null,
+      requirements: badgeRequirements,
     });
   }
 
-  const allBadgeIds = items.map((item) => item.badgeDbId).filter(Boolean);
-  const imageMap = await loadBadgeImagesBatch(allBadgeIds);
-
-  for (const item of items) {
-    if (imageMap[item.badgeDbId]) {
-      item.badgeImage = imageMap[item.badgeDbId];
-    }
-  }
-
-  return items.sort((left, right) => right.points - left.points);
+  return items;
 };
 
 const buildMyRequests = async (accountId) => {
-  try { await autoRejectExpiredRequests(); } catch (e) { console.error('Error auto-rejecting expired requests:', e); }
-  try { await adminBadgeModel.checkAndExpireBadges(); } catch (e) { console.error('Error checking expired badges:', e); }
+  try {
+    await autoRejectExpiredRequests();
+  } catch (error) {
+    console.error('Error auto-rejecting expired requests:', error);
+  }
+
   const utilizadorId = await getUtilizadorIdByAccountId(accountId);
   if (!utilizadorId) {
     return [];
@@ -1769,32 +1742,32 @@ const buildMyRequests = async (accountId) => {
     `
       SELECT
         p.npedido,
+        p.nbadge,
         p.data_submissao,
+        p.data_limite,
         e.estado,
         b.b_nome,
-        b.validade,
-        meta.area,
-        meta.nivel
+        b.b_descricao,
+        b.imagem,
+        b.pontos AS badge_pontos,
+        t.tipo,
+        a.area,
+        n.nivel,
+        b.validade
       FROM pedidos AS p
       INNER JOIN estado AS e
         ON e.nestado = p.estado
       LEFT JOIN badge AS b
         ON b.nbadge = p.nbadge
-      LEFT JOIN (
-        SELECT DISTINCT ON (ncb.nbadge)
-          ncb.nbadge,
-          a.area,
-          n.nivel
-        FROM nivel_contem_b AS ncb
-        LEFT JOIN nivel AS n
-          ON n.nnivel = ncb.nnivel
-        LEFT JOIN area AS a
-          ON a.narea = n.narea
-        ORDER BY ncb.nbadge, n.nnivel ASC
-      ) AS meta
-        ON meta.nbadge = p.nbadge
+      LEFT JOIN tipo AS t
+        ON t.ntipo = b.ntipo
+      LEFT JOIN nivel_contem_b AS ncb
+        ON ncb.nbadge = p.nbadge
+      LEFT JOIN nivel AS n
+        ON n.nnivel = ncb.nnivel
+      LEFT JOIN area AS a
+        ON a.narea = n.narea
       WHERE p.nutilizador = :utilizadorId
-        AND (b.validade IS NULL OR b.validade > CURRENT_DATE)
       ORDER BY p.data_submissao DESC, p.npedido DESC
     `,
     {
@@ -1803,373 +1776,492 @@ const buildMyRequests = async (accountId) => {
     },
   );
 
-  return rows.map((row) => {
-    const level = normalizeLevelTitle(row.nivel) || 'Intermedio';
+  const items = rows.map((row) => {
+    const mappedStatus = mapPedidoEstadoToMyRequestStatus(row.estado);
+    const template = resolveBadgeTemplate(row.nivel, 0, row.tipo);
 
     return {
       id: Number(row.npedido),
-      badge: row.b_nome || row.area || 'Badge',
-      level,
+      name: row.b_nome || 'Badge',
+      description: row.b_descricao || '',
+      points: Number(row.badge_pontos) || template.points,
+      badgeImage: row.imagem || template.badgeImage,
+      status: mappedStatus,
       date: formatShortDate(row.data_submissao),
-      status: mapPedidoEstadoToMyRequestStatus(row.estado),
+      expiryDate: formatShortDate(row.validade),
+      level: normalizeLevelTitle(row.nivel),
+      area: row.area || 'Badge',
+      serviceLine: 'Service Line',
+    };
+  });
+
+  return items;
+};
+
+const buildBadgeSuggestions = async (accountId, limit = 3) => {
+  const utilizadorId = await getUtilizadorIdByAccountId(accountId);
+  if (!utilizadorId) {
+    return [];
+  }
+
+  const preferences = await Preferencia.findAll({
+    where: { nutilizador: utilizadorId },
+    attributes: ['narea'],
+    raw: true,
+  });
+
+  const preferenceAreaIds = preferences.map((p) => Number(p.narea)).filter((id) => Number.isInteger(id) && id > 0);
+
+  const query = preferenceAreaIds.length > 0
+    ? `
+        SELECT
+          b.nbadge,
+          b.b_nome,
+          b.b_descricao,
+          b.pontos,
+          b.imagem,
+          t.tipo,
+          n.nivel,
+          a.area,
+          a.narea
+        FROM badge AS b
+        LEFT JOIN tipo AS t ON t.ntipo = b.ntipo
+        LEFT JOIN nivel_contem_b AS ncb ON ncb.nbadge = b.nbadge
+        LEFT JOIN nivel AS n ON n.nnivel = ncb.nnivel
+        LEFT JOIN area AS a ON a.narea = n.narea
+        WHERE (b.validade IS NULL OR b.validade > CURRENT_DATE)
+          AND a.narea IN (:areaIds)
+          AND NOT EXISTS (
+            SELECT 1 FROM c_obtem_b AS cb
+            WHERE cb.nutilizador = :utilizadorId AND cb.nbadge = b.nbadge
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM pedidos AS p
+            WHERE p.nutilizador = :utilizadorId AND p.nbadge = b.nbadge
+          )
+        ORDER BY b.pontos DESC
+        LIMIT :limit
+      `
+    : `
+        SELECT
+          b.nbadge,
+          b.b_nome,
+          b.b_descricao,
+          b.pontos,
+          b.imagem,
+          t.tipo,
+          n.nivel,
+          a.area,
+          a.narea
+        FROM badge AS b
+        LEFT JOIN tipo AS t ON t.ntipo = b.ntipo
+        LEFT JOIN nivel_contem_b AS ncb ON ncb.nbadge = b.nbadge
+        LEFT JOIN nivel AS n ON n.nnivel = ncb.nnivel
+        LEFT JOIN area AS a ON a.narea = n.narea
+        WHERE (b.validade IS NULL OR b.validade > CURRENT_DATE)
+          AND NOT EXISTS (
+            SELECT 1 FROM c_obtem_b AS cb
+            WHERE cb.nutilizador = :utilizadorId AND cb.nbadge = b.nbadge
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM pedidos AS p
+            WHERE p.nutilizador = :utilizadorId AND p.nbadge = b.nbadge
+          )
+        ORDER BY b.pontos DESC
+        LIMIT :limit
+      `;
+
+  const rows = await sequelize.query(query, {
+    replacements: {
+      utilizadorId,
+      areaIds: preferenceAreaIds,
+      limit: Number(limit) || 3,
+    },
+    type: QueryTypes.SELECT,
+  });
+
+  return (rows || []).map((row, index) => {
+    const isSpecial = isSpecialTypeName(row.tipo);
+    const template = resolveBadgeTemplate(row.nivel, index, row.tipo);
+    return {
+      id: `suggestion-${Number(row.nbadge)}`,
+      badgeDbId: Number(row.nbadge),
+      name: row.b_nome || row.area || 'Badge',
+      description: row.b_descricao || '',
+      points: Number(row.pontos) || template.points,
+      badgeImage: resolveBadgeImage(row.imagem, template.badgeImage, isSpecial),
+      levelKey: isSpecial ? 'special' : template.levelKey,
+      isSpecial,
+      accent: suggestionAccentPalette[index % suggestionAccentPalette.length],
+    };
+  });
+};
+
+const getProfileData = async (accountId) => {
+  return buildProfileData(accountId);
+};
+
+const updateProfileData = async (accountId, data) => {
+  const parsedAccountId = Number(accountId);
+  if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) {
+    throw new Error('Invalid accountId');
+  }
+
+  const account = await Account.findByPk(parsedAccountId);
+  if (!account) {
+    throw new Error('Account not found');
+  }
+
+  if (data?.nome) {
+    account.nome = String(data.nome).trim().slice(0, 100);
+  }
+
+  if (data?.localizacao !== undefined) {
+    await sequelize.query(
+      `
+        UPDATE utilizador
+        SET localizacao = :localizacao
+        WHERE nutilizador = :accountId
+      `,
+      {
+        replacements: {
+          localizacao: String(data.localizacao || '').trim().slice(0, 200),
+          accountId: parsedAccountId,
+        },
+        type: QueryTypes.UPDATE,
+      },
+    );
+  }
+
+  await account.save();
+
+  return { updated: true };
+};
+
+const getRankingConsultores = async () => {
+  return buildRankingConsultores();
+};
+
+const getReminders = async (accountId) => {
+  const parsedAccountId = Number(accountId);
+  if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) {
+    return [];
+  }
+
+  const reminders = await Reminder.findAll({
+    where: { accountId: parsedAccountId },
+    order: [['date', 'ASC']],
+  });
+
+  return reminders.map((r) => ({
+    id: Number(r.id),
+    title: r.title,
+    description: r.description,
+    date: formatShortDate(r.date),
+    color: r.color,
+  }));
+};
+
+const createReminder = async (accountId, { title, description, date, color }) => {
+  const parsedAccountId = Number(accountId);
+  if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) {
+    return null;
+  }
+
+  const reminder = await Reminder.create({
+    title,
+    description,
+    date,
+    color,
+    accountId: parsedAccountId,
+  });
+
+  return {
+    id: Number(reminder.id),
+    title: reminder.title,
+    description: reminder.description,
+    date: formatShortDate(reminder.date),
+    color: reminder.color,
+  };
+};
+
+const updateReminder = async (reminderId, accountId, { title, description, date, color }) => {
+  const parsedAccountId = Number(accountId);
+  const parsedReminderId = Number(reminderId);
+  if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) {
+    return null;
+  }
+
+  const reminder = await Reminder.findOne({
+    where: { id: parsedReminderId, accountId: parsedAccountId },
+  });
+
+  if (!reminder) {
+    return null;
+  }
+
+  reminder.title = title;
+  reminder.description = description;
+  reminder.date = date;
+  reminder.color = color;
+  await reminder.save();
+
+  return {
+    id: Number(reminder.id),
+    title: reminder.title,
+    description: reminder.description,
+    date: formatShortDate(reminder.date),
+    color: reminder.color,
+  };
+};
+
+const deleteReminder = async (reminderId, accountId) => {
+  const parsedAccountId = Number(accountId);
+  const parsedReminderId = Number(reminderId);
+  if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) {
+    return false;
+  }
+
+  const deleted = await Reminder.destroy({
+    where: { id: parsedReminderId, accountId: parsedAccountId },
+  });
+
+  return deleted > 0;
+};
+
+const getPedidoDetail = async (accountId, pedidoId) => {
+  const parsedAccountId = Number(accountId);
+  const parsedPedidoId = Number(pedidoId);
+  if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) {
+    return null;
+  }
+
+  const rows = await sequelize.query(
+    `
+      SELECT
+        p.npedido,
+        p.nbadge,
+        p.data_submissao,
+        p.data_limite,
+        p.descricao,
+        e.estado,
+        b.b_nome,
+        b.b_descricao,
+        b.imagem,
+        b.pontos AS badge_pontos,
+        t.tipo,
+        a.area,
+        n.nivel,
+        b.validade
+      FROM pedidos AS p
+      INNER JOIN estado AS e ON e.nestado = p.estado
+      LEFT JOIN badge AS b ON b.nbadge = p.nbadge
+      LEFT JOIN tipo AS t ON t.ntipo = b.ntipo
+      LEFT JOIN nivel_contem_b AS ncb ON ncb.nbadge = p.nbadge
+      LEFT JOIN nivel AS n ON n.nnivel = ncb.nnivel
+      LEFT JOIN area AS a ON a.narea = n.narea
+      WHERE p.npedido = :pedidoId
+        AND p.nutilizador = :utilizadorId
+      LIMIT 1
+    `,
+    {
+      replacements: { pedidoId: parsedPedidoId, utilizadorId: parsedAccountId },
+      type: QueryTypes.SELECT,
+    },
+  );
+
+  if (!rows || rows.length === 0) {
+    return null;
+  }
+
+  const row = rows[0];
+  const template = resolveBadgeTemplate(row.nivel, 0, row.tipo);
+  const mappedStatus = mapPedidoEstadoToMyRequestStatus(row.estado);
+
+  return {
+    id: Number(row.npedido),
+    name: row.b_nome || 'Badge',
+    description: row.b_descricao || '',
+    points: Number(row.badge_pontos) || template.points,
+    badgeImage: row.imagem || template.badgeImage,
+    status: mappedStatus,
+    date: formatShortDate(row.data_submissao),
+    expiryDate: formatShortDate(row.validade),
+    level: normalizeLevelTitle(row.nivel),
+    area: row.area || 'Badge',
+  };
+};
+
+const saveEvidences = async (accountId, pedidoId, nreq, fileData) => {
+  const parsedAccountId = Number(accountId);
+  const parsedPedidoId = Number(pedidoId);
+  const parsedNreq = Number(nreq);
+
+  if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) {
+    throw new Error('Invalid account id.');
+  }
+
+  if (!Number.isInteger(parsedPedidoId) || parsedPedidoId <= 0) {
+    throw new Error('Invalid pedido id.');
+  }
+
+  if (!Number.isInteger(parsedNreq) || parsedNreq <= 0) {
+    throw new Error('Invalid requirement id.');
+  }
+
+  const pedido = await Pedido.findOne({
+    where: { npedido: parsedPedidoId, nutilizador: parsedAccountId },
+    attributes: ['npedido'],
+  });
+
+  if (!pedido) {
+    throw new Error('Pedido not found or not owned by this account.');
+  }
+
+  const evidence = await Evidencia.create({
+    npedido: parsedPedidoId,
+    nreq: parsedNreq,
+    nevidencia: fileData.filename,
+    formato: fileData.formato,
+  });
+
+  return {
+    id: Number(evidence.nevidencias),
+    npedido: parsedPedidoId,
+    nreq: parsedNreq,
+    filename: fileData.filename,
+    formato: fileData.formato,
+  };
+};
+
+const getBadgeRequirements = async (badgeId) => {
+  const parsedBadgeId = Number(badgeId);
+  if (!Number.isInteger(parsedBadgeId) || parsedBadgeId <= 0) {
+    return [];
+  }
+
+  const rows = await Requisito.findAll({
+    where: { nbadge: parsedBadgeId },
+    attributes: ['nreq', 'requisito', 'r_descricao', 'imagem'],
+    order: [['nreq', 'ASC']],
+    raw: true,
+  });
+
+  return (rows || []).map((row) => ({
+    id: `req-${Number(row.nreq)}`,
+    title: row.requisito || 'Requisito',
+    description: row.r_descricao || '',
+    image: row.imagem || null,
+    files: 0,
+    attachments: [],
+  }));
+};
+
+const getCatalogBadges = async (includeExpired = false, accountId = null) => {
+  const whereClause = includeExpired
+    ? ''
+    : "WHERE (b.validade IS NULL OR b.validade > CURRENT_DATE)";
+
+  const rows = await sequelize.query(
+    `
+      SELECT
+        b.nbadge,
+        b.b_nome,
+        b.b_descricao,
+        b.pontos,
+        b.imagem,
+        t.tipo,
+        n.nivel,
+        a.area,
+        a.narea,
+        b.validade
+      FROM badge AS b
+      LEFT JOIN tipo AS t ON t.ntipo = b.ntipo
+      LEFT JOIN nivel_contem_b AS ncb ON ncb.nbadge = b.nbadge
+      LEFT JOIN nivel AS n ON n.nnivel = ncb.nnivel
+      LEFT JOIN area AS a ON a.narea = n.narea
+      ${whereClause}
+      ORDER BY b.nbadge ASC
+    `,
+    { type: QueryTypes.SELECT },
+  );
+
+  const badgeIds = rows.map((r) => Number(r.nbadge)).filter(Boolean);
+  const imageMap = badgeIds.length > 0 ? await loadBadgeImagesBatch(badgeIds) : {};
+
+  let userObtainedBadgeIds = new Set();
+  let userRequestedBadgeIds = new Set();
+
+  if (accountId) {
+    const utilizadorId = await getUtilizadorIdByAccountId(accountId);
+    if (utilizadorId) {
+      const [obtained, requested] = await Promise.all([
+        CObtemBadge.findAll({
+          where: { nutilizador: utilizadorId },
+          attributes: ['nbadge'],
+          raw: true,
+        }),
+        Pedido.findAll({
+          where: { nutilizador: utilizadorId },
+          attributes: ['nbadge'],
+          raw: true,
+        }),
+      ]);
+
+      userObtainedBadgeIds = new Set(obtained.map((r) => Number(r.nbadge)));
+      userRequestedBadgeIds = new Set(requested.map((r) => Number(r.nbadge)));
+    }
+  }
+
+  const badgeIdsForRequirements = rows.map((r) => Number(r.nbadge)).filter(Boolean);
+  const requirementsByBadge = await loadRequirementsByBadgeIds(badgeIdsForRequirements);
+
+  return (rows || []).map((row, index) => {
+    const isSpecial = isSpecialTypeName(row.tipo);
+    const template = resolveBadgeTemplate(row.nivel, index, row.tipo);
+    const badgeId = Number(row.nbadge);
+
+    let status = 'visualizar';
+    if (userObtainedBadgeIds.has(badgeId)) {
+      status = 'obtido';
+    } else if (userRequestedBadgeIds.has(badgeId)) {
+      status = 'candidatura_em_progresso';
+    }
+
+    return {
+      id: `catalog-${badgeId}`,
+      badgeDbId: badgeId,
+      name: row.b_nome || row.area || 'Badge',
+      description: row.b_descricao || '',
+      points: Number(row.pontos) || template.points,
+      badgeImage: imageMap[badgeId] || resolveBadgeImage(row.imagem, template.badgeImage, isSpecial),
+      levelKey: isSpecial ? 'special' : template.levelKey,
+      isSpecial,
+      status,
+      requirements: clone(requirementsByBadge.get(badgeId) || []),
       validade: row.validade || null,
     };
   });
 };
 
-const getSelectedAreaRowsByUtilizadorId = async (utilizadorId) => {
-  if (!utilizadorId) {
-    return [];
-  }
-
-  return sequelize.query(
-    `
-      SELECT
-        a.narea,
-        a.area,
-        a.a_desc,
-        sl.sline
-      FROM preferencias AS p
-      INNER JOIN area AS a
-        ON a.narea = p.narea
-      LEFT JOIN service_line AS sl
-        ON sl.nsline = a.nsline
-      WHERE p.nutilizador = :utilizadorId
-      ORDER BY LOWER(a.area) ASC, a.narea ASC
-    `,
-    {
-      replacements: { utilizadorId: Number(utilizadorId) },
-      type: QueryTypes.SELECT,
-    },
-  );
-};
-
-const buildPreferenceAreas = async (accountId) => {
-  const utilizadorId = accountId ? await getUtilizadorIdByAccountId(accountId) : null;
-
-  const [areasRows, selectedRows] = await Promise.all([
-    sequelize.query(
-      `
-        SELECT
-          a.narea,
-          a.area,
-          a.a_desc,
-          sl.sline,
-          COUNT(DISTINCT bpa.nbadge) AS total_badges
-        FROM area AS a
-        LEFT JOIN service_line AS sl
-          ON sl.nsline = a.nsline
-        LEFT JOIN b_pertence_a AS bpa
-          ON bpa.narea = a.narea
-        GROUP BY a.narea, a.area, a.a_desc, sl.sline
-        ORDER BY LOWER(a.area) ASC, a.narea ASC
-      `,
-      {
-        type: QueryTypes.SELECT,
-      },
-    ),
-    getSelectedAreaRowsByUtilizadorId(utilizadorId),
-  ]);
-
-  const selectedAreaIds = new Set(selectedRows.map((row) => Number(row.narea)));
-
-  return areasRows.map((row) => ({
-    id: Number(row.narea),
-    name: row.area || 'Area',
-    description: row.a_desc || '',
-    serviceLine: row.sline || '',
-    badgeCount: Number(row.total_badges) || 0,
-    selected: selectedAreaIds.has(Number(row.narea)),
-  }));
-};
-
-const buildUserPreferences = async (accountId) => {
-  const utilizadorId = await getUtilizadorIdByAccountId(accountId);
-  if (!utilizadorId) {
-    return [];
-  }
-
-  const rows = await getSelectedAreaRowsByUtilizadorId(utilizadorId);
-  return rows.map((row) => ({
-    id: Number(row.narea),
-    name: row.area || 'Area',
-    description: row.a_desc || '',
-    serviceLine: row.sline || '',
-  }));
-};
-
-const saveUserPreferences = async (accountId, areaIds) => {
-  const parsedAreaIds = [...new Set(
-    (Array.isArray(areaIds) ? areaIds : [])
-      .map((value) => Number(value))
-      .filter((value) => Number.isInteger(value) && value > 0),
-  )];
-
-  if (parsedAreaIds.length === 0) {
-    const error = new Error('At least one area is required.');
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const utilizadorId = await getUtilizadorIdByAccountId(accountId);
-  if (!utilizadorId) {
-    const error = new Error('User not found for account.');
-    error.statusCode = 404;
-    throw error;
-  }
-
-  const existingAreaRows = await sequelize.query(
-    `
-      SELECT narea
-      FROM area
-      WHERE narea IN (:areaIds)
-    `,
-    {
-      replacements: { areaIds: parsedAreaIds },
-      type: QueryTypes.SELECT,
-    },
-  );
-
-  const existingAreaIds = new Set(existingAreaRows.map((row) => Number(row.narea)));
-  if (existingAreaIds.size !== parsedAreaIds.length) {
-    const error = new Error('One or more selected areas are invalid.');
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const transaction = await sequelize.transaction();
-  try {
-    await sequelize.query(
-      `
-        DELETE FROM preferencias
-        WHERE nutilizador = :utilizadorId
-      `,
-      {
-        replacements: { utilizadorId },
-        type: QueryTypes.DELETE,
-        transaction,
-      },
-    );
-
-    for (const areaId of parsedAreaIds) {
-      await sequelize.query(
-        `
-          INSERT INTO preferencias (nutilizador, narea)
-          VALUES (:utilizadorId, :areaId)
-          ON CONFLICT (narea, nutilizador) DO NOTHING
-        `,
-        {
-          replacements: { utilizadorId, areaId },
-          type: QueryTypes.INSERT,
-          transaction,
-        },
-      );
-    }
-
-    await transaction.commit();
-  } catch (error) {
-    await transaction.rollback();
-    throw error;
-  }
-
-  return buildUserPreferences(accountId);
-};
-
-const buildBadgeSuggestions = async (accountId, limit = 3) => {
-  try { await autoRejectExpiredRequests(); } catch (e) { console.error('Error auto-rejecting expired requests:', e); }
-  try { await adminBadgeModel.checkAndExpireBadges(); } catch (e) { console.error('Error checking expired badges:', e); }
-  const safeLimit = Number.isInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 3;
-  const utilizadorId = await getUtilizadorIdByAccountId(accountId);
-  if (!utilizadorId) {
-    return [];
-  }
-
-  const preferredAreas = await getSelectedAreaRowsByUtilizadorId(utilizadorId);
-  if (preferredAreas.length === 0) {
-    return [];
-  }
-
-  const preferredAreaIds = preferredAreas.map((area) => Number(area.narea));
-
-  const [candidateRows, obtainedRows, requestRows] = await Promise.all([
-    sequelize.query(
-      `
-        SELECT DISTINCT ON (b.nbadge)
-          b.nbadge,
-          b.b_nome,
-          b.imagem,
-          a.narea,
-          a.area,
-          n.nivel,
-          t.tipo
-        FROM area AS a
-        INNER JOIN nivel AS n
-          ON n.narea = a.narea
-        INNER JOIN nivel_contem_b AS ncb
-          ON ncb.nnivel = n.nnivel
-        INNER JOIN badge AS b
-          ON b.nbadge = ncb.nbadge
-        LEFT JOIN tipo AS t
-          ON t.ntipo = b.ntipo
-        WHERE a.narea IN (:areaIds)
-          AND (b.validade IS NULL OR b.validade > CURRENT_DATE)
-        ORDER BY b.nbadge ASC
-      `,
-      {
-        replacements: { areaIds: preferredAreaIds },
-        type: QueryTypes.SELECT,
-      },
-    ),
-    sequelize.query(
-      `
-        SELECT nbadge
-        FROM c_obtem_b
-        WHERE nutilizador = :utilizadorId
-      `,
-      {
-        replacements: { utilizadorId },
-        type: QueryTypes.SELECT,
-      },
-    ),
-    sequelize.query(
-      `
-        SELECT DISTINCT ON (p.nbadge)
-          p.nbadge,
-          e.estado
-        FROM pedidos AS p
-        INNER JOIN estado AS e
-          ON e.nestado = p.estado
-        WHERE p.nutilizador = :utilizadorId
-        ORDER BY p.nbadge, p.data_submissao DESC, p.npedido DESC
-      `,
-      {
-        replacements: { utilizadorId },
-        type: QueryTypes.SELECT,
-      },
-    ),
-  ]);
-
-  const obtainedBadgeIds = new Set(obtainedRows.map((row) => Number(row.nbadge)));
-  const requestStatusByBadge = new Map(
-    requestRows.map((row) => [Number(row.nbadge), mapPedidoEstadoToLearningPathStatus(row.estado)]),
-  );
-
-  const candidateRowsByArea = new Map();
-  for (const row of candidateRows) {
-    const areaId = Number(row.narea);
-    if (!candidateRowsByArea.has(areaId)) {
-      candidateRowsByArea.set(areaId, []);
-    }
-
-    candidateRowsByArea.get(areaId).push(row);
-  }
-
-  for (const rows of candidateRowsByArea.values()) {
-    rows.sort((left, right) => {
-      const leftTemplate = resolveBadgeTemplate(left.nivel);
-      const rightTemplate = resolveBadgeTemplate(right.nivel);
-      return leftTemplate.points - rightTemplate.points;
-    });
-  }
-
-  const suggestions = [];
-  const suggestedBadgeIds = new Set();
-  for (let index = 0; index < preferredAreas.length; index += 1) {
-    if (suggestions.length >= safeLimit) {
-      break;
-    }
-
-    const area = preferredAreas[index];
-    const areaRows = candidateRowsByArea.get(Number(area.narea)) || [];
-
-    const matchedRow = areaRows.find((row) => {
-      const badgeId = Number(row.nbadge);
-      if (obtainedBadgeIds.has(badgeId)) {
-        return false;
-      }
-
-      const latestRequestStatus = requestStatusByBadge.get(badgeId);
-      if (latestRequestStatus === 'pendente-tm' || latestRequestStatus === 'pendente-sll') {
-        return false;
-      }
-      return true;
-    });
-
-    if (!matchedRow) {
-      continue;
-    }
-
-    const isSpecial = isSpecialTypeName(matchedRow.tipo);
-    const template = resolveBadgeTemplate(matchedRow.nivel, 0, matchedRow.tipo);
-    suggestedBadgeIds.add(Number(matchedRow.nbadge));
-    suggestions.push({
-      title: matchedRow.b_nome || matchedRow.area || area.area || 'Badge',
-      subtitleKey: template.levelKey,
-      accent: suggestionAccentPalette[index % suggestionAccentPalette.length],
-      badgeDbId: Number(matchedRow.nbadge),
-      levelKey: isSpecial ? null : template.levelKey,
-      typeId: isSpecial ? 'special' : template.levelKey,
-      isSpecial,
-      badgeImage: resolveBadgeImage(matchedRow.imagem, template.badgeImage, isSpecial),
-    });
-  }
-
-  const badgeIds = suggestions.map((s) => s.badgeDbId).filter(Boolean);
-  const imageMap = await loadBadgeImagesBatch(badgeIds);
-  for (const s of suggestions) {
-    if (imageMap[s.badgeDbId]) {
-      s.badgeImage = imageMap[s.badgeDbId];
-    }
-  }
-
-  return suggestions;
-};
-
 const requestBadgeAcquisition = async (accountId, badgeId) => {
-  try { await autoRejectExpiredRequests(); } catch (e) { console.error('Error auto-rejecting expired requests:', e); }
-  try { await adminBadgeModel.checkAndExpireBadges(); } catch (e) { console.error('Error checking expired badges:', e); }
+  const parsedAccountId = Number(accountId);
   const parsedBadgeId = Number(badgeId);
+
+  if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) {
+    throw new Error('Invalid account id.');
+  }
+
   if (!Number.isInteger(parsedBadgeId) || parsedBadgeId <= 0) {
-    const error = new Error('Invalid badge id.');
-    error.statusCode = 400;
-    throw error;
+    throw new Error('Invalid badge id.');
   }
 
-  const utilizadorId = await getUtilizadorIdByAccountId(accountId);
+  const utilizadorId = await getUtilizadorIdByAccountId(parsedAccountId);
   if (!utilizadorId) {
-    const error = new Error('User not found for account.');
-    error.statusCode = 404;
-    throw error;
+    throw new Error('User not found.');
   }
 
-  const [badgeExists] = await sequelize.query(
-    `
-      SELECT nbadge, validade
-      FROM badge
-      WHERE nbadge = :badgeId
-      LIMIT 1
-    `,
-    {
-      replacements: { badgeId: parsedBadgeId },
-      type: QueryTypes.SELECT,
-    },
-  );
-
-  if (!badgeExists) {
-    const error = new Error('Badge not found.');
-    error.statusCode = 404;
-    throw error;
-  }
-
-  if (badgeExists.validade && new Date(badgeExists.validade) <= new Date()) {
-    const error = new Error('Esta badge já expirou e não pode ser solicitada.');
-    error.statusCode = 410;
-    throw error;
-  }
-
-  await ensureRequirementsForBadges([parsedBadgeId]);
-
-  const [alreadyObtained] = await sequelize.query(
+  const [hasObtained] = await sequelize.query(
     `
       SELECT 1
       FROM c_obtem_b
@@ -2183,763 +2275,229 @@ const requestBadgeAcquisition = async (accountId, badgeId) => {
     },
   );
 
-  if (alreadyObtained) {
-    return { status: 'obtido', requestId: null };
+  if (hasObtado) {
+    const error = new Error('Badge already obtained.');
+    error.statusCode = 409;
+    throw error;
   }
 
-  const candidaturaEstadoId = await ensureEstadoId('candidatura_em_progresso');
-  const [existingRequest] = await sequelize.query(
+  const pendingEstadoId = await ensureEstadoId('pendente-tm');
+
+  const [createdPedido] = await sequelize.query(
     `
-      SELECT p.npedido, e.estado
-      FROM pedidos AS p
-      INNER JOIN estado AS e
-        ON e.nestado = p.estado
-      WHERE p.nutilizador = :utilizadorId
-        AND p.nbadge = :badgeId
-      ORDER BY p.data_submissao DESC, p.npedido DESC
-      LIMIT 1
-    `,
-    {
-      replacements: { utilizadorId, badgeId: parsedBadgeId },
-      type: QueryTypes.SELECT,
-    },
-  );
-
-  if (existingRequest) {
-    const existingRequestId = Number(existingRequest.npedido);
-    const existingEstado = normalizePedidoEstado(existingRequest.estado);
-    if (existingEstado === pedidoEstados.aprovado) {
-      return { status: 'obtido', requestId: existingRequestId };
-    }
-
-    if (isEstadoEmValidacao(existingEstado)) {
-      return { status: 'pendente-tm', requestId: existingRequestId };
-    }
-
-    if (
-      existingEstado !== pedidoEstados.candidaturaEmProgresso
-      && existingEstado !== pedidoEstados.evidenciasInsuficientes
-      && existingEstado !== pedidoEstados.rejeitado
-    ) {
-      const currentStatus = mapPedidoEstadoToLearningPathStatus(existingEstado);
-      return {
-        status: currentStatus === 'visualizar' ? 'candidatura_em_progresso' : currentStatus,
-        requestId: existingRequestId,
-      };
-    }
-
-    const nextStatus = pedidoEstados.emValidacaoTm;
-    const nextEstadoId = await ensureEstadoId(nextStatus);
-
-    await sequelize.query(
-      `
-        UPDATE pedidos
-        SET estado = :estadoId,
-            data_submissao = CURRENT_DATE,
-            data_limite = CURRENT_DATE + INTERVAL '3 months'
-        WHERE npedido = :pedidoId
-      `,
-      {
-        replacements: {
-          estadoId: nextEstadoId,
-          pedidoId: Number(existingRequest.npedido),
-        },
-        type: QueryTypes.UPDATE,
-      },
-    );
-
-    // Send email confirmation of submission to TM
-    try {
-      const [consultorInfo] = await sequelize.query(
-        'SELECT u.nome, u.email FROM utilizador u WHERE u.nutilizador = :utilizadorId LIMIT 1',
-        {
-          replacements: { utilizadorId: Number(utilizadorId) },
-          type: QueryTypes.SELECT,
-        }
-      );
-      const [badgeInfo] = await sequelize.query(
-        'SELECT b_nome FROM badge WHERE nbadge = :badgeId LIMIT 1',
-        {
-          replacements: { badgeId: Number(parsedBadgeId) },
-          type: QueryTypes.SELECT,
-        }
-      );
-      if (consultorInfo?.email) {
-        await sendEmail({
-          to: consultorInfo.email,
-          subject: 'Pedido de Badge Enviado - PINT',
-          html: emailTemplates.requestSubmittedToTM({
-            userName: consultorInfo.nome || 'Consultor',
-            badgeName: badgeInfo?.b_nome || 'Badge',
-          }),
-        });
-      }
-    } catch (emailError) {
-      console.error('Failed to send request submission email.', emailError);
-    }
-
-    return { status: 'pendente-tm', requestId: existingRequestId };
-  }
-
-  const [createdRequest] = await sequelize.query(
-    `
-      INSERT INTO pedidos (nbadge, nutilizador, estado, data_submissao, data_limite)
-      VALUES (:badgeId, :utilizadorId, :estadoId, CURRENT_DATE, CURRENT_DATE + INTERVAL '3 months')
+      INSERT INTO pedidos (nutilizador, nbadge, estado, data_submissao, data_limite)
+      VALUES (:utilizadorId, :badgeId, :estadoId, CURRENT_DATE, CURRENT_DATE + INTERVAL '3 months')
       RETURNING npedido
     `,
     {
       replacements: {
-        badgeId: parsedBadgeId,
         utilizadorId,
-        estadoId: candidaturaEstadoId,
+        badgeId: parsedBadgeId,
+        estadoId: pendingEstadoId,
       },
       type: QueryTypes.SELECT,
     },
   );
-
-  return { status: 'candidatura_em_progresso', requestId: Number(createdRequest?.npedido) || null };
-};
-
-const mapReminder = (reminder) => ({
-  id: reminder.id,
-  accountId: reminder.accountId,
-  title: reminder.title,
-  description: reminder.description,
-  date: reminder.date,
-  color: reminder.color,
-});
-
-const saveEvidences = async (accountId, pedidoId, nreq, fileMeta) => {
-  const parsedAccountId = Number(accountId);
-  const parsedPedido = Number(pedidoId);
-  let parsedNreq = Number(nreq) || null;
-
-  if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) {
-    const error = new Error('Invalid account id.');
-    error.statusCode = 400;
-    throw error;
-  }
-
-  if (!Number.isInteger(parsedPedido) || parsedPedido <= 0) {
-    const error = new Error('Invalid pedido id.');
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const utilizadorId = await getUtilizadorIdByAccountId(parsedAccountId);
-  if (!utilizadorId) {
-    const error = new Error('User not found for account.');
-    error.statusCode = 404;
-    throw error;
-  }
-
-  const [requestRow] = await sequelize.query(
-    `
-      SELECT npedido, nbadge
-      FROM pedidos
-      WHERE npedido = :pedidoId
-        AND nutilizador = :utilizadorId
-      LIMIT 1
-    `,
-    {
-      replacements: { pedidoId: parsedPedido, utilizadorId },
-      type: QueryTypes.SELECT,
-    },
-  );
-
-  if (!requestRow) {
-    const error = new Error('Request not found for account.');
-    error.statusCode = 404;
-    throw error;
-  }
-
-  if (Number.isInteger(parsedNreq) && parsedNreq > 0) {
-    const [requirementRow] = await sequelize.query(
-      `
-        SELECT 1
-        FROM requisitos
-        WHERE nreq = :nreq
-          AND nbadge = :badgeId
-        LIMIT 1
-      `,
-      {
-        replacements: {
-          nreq: parsedNreq,
-          badgeId: Number(requestRow.nbadge),
-        },
-        type: QueryTypes.SELECT,
-      },
-    );
-
-    if (!requirementRow) {
-      parsedNreq = null;
-    }
-  }
-
-  const nevidencia = String(fileMeta.filename || fileMeta.originalName || 'evidence').slice(0, 50);
-  const formato = String(fileMeta.formato || '').slice(0, 50);
-
-  const [inserted] = await sequelize.query(
-    `
-      INSERT INTO evidencias (nevidencia, e_data_submissao, formato, nreq, npedido)
-      VALUES (:nevidencia, CURRENT_DATE, :formato, :nreq, :npedido)
-      RETURNING nevidencias, nevidencia, formato, nreq, npedido
-    `,
-    {
-      replacements: {
-        nevidencia,
-        formato,
-        nreq: parsedNreq,
-        npedido: parsedPedido,
-      },
-      type: QueryTypes.SELECT,
-    },
-  );
-
-  return inserted || {
-    nevidencia,
-    formato,
-    nreq: parsedNreq,
-    npedido: parsedPedido,
-  };
-};
-
-const getPedidoDetail = async (accountId, pedidoId) => {
-  const parsedPedidoId = Number(pedidoId);
-  if (!Number.isInteger(parsedPedidoId) || parsedPedidoId <= 0) {
-    return null;
-  }
-
-  const utilizadorId = await getUtilizadorIdByAccountId(accountId);
-  if (!utilizadorId) {
-    return null;
-  }
-
-  const [row] = await sequelize.query(
-    `
-      SELECT
-        p.npedido,
-        p.data_submissao,
-        p.data_limite,
-        p.descricao,
-        e.estado AS estado_nome,
-        u.nome AS consultor_nome,
-        b.nbadge,
-        b.b_nome,
-        b.b_descricao,
-        b.pontos AS badge_pontos,
-        b.imagem AS badge_imagem,
-        b.validade,
-        t.tipo AS tipo_nome,
-        n.nivel AS nivel_nome,
-        a.area AS area_nome,
-        sl.sline AS sline_nome,
-        lp.lpath AS lpath_nome
-      FROM pedidos AS p
-      INNER JOIN estado AS e ON e.nestado = p.estado
-      INNER JOIN utilizador AS u ON u.nutilizador = p.nutilizador
-      LEFT JOIN badge AS b ON b.nbadge = p.nbadge
-      LEFT JOIN tipo AS t ON t.ntipo = b.ntipo
-      LEFT JOIN nivel_contem_b AS ncb ON ncb.nbadge = b.nbadge
-      LEFT JOIN nivel AS n ON n.nnivel = ncb.nnivel
-      LEFT JOIN area AS a ON a.narea = n.narea
-      LEFT JOIN service_line AS sl ON sl.nsline = a.nsline
-      LEFT JOIN learning_path AS lp ON lp.nlpath = sl.nlpath
-      WHERE p.npedido = :pedidoId
-        AND p.nutilizador = :utilizadorId
-      LIMIT 1
-    `,
-    {
-      replacements: { pedidoId: parsedPedidoId, utilizadorId },
-      type: QueryTypes.SELECT,
-    },
-  );
-
-  if (!row) {
-    return null;
-  }
-
-  const badgeId = Number(row.nbadge);
-  const isSpecial = isSpecialTypeName(row.tipo_nome);
-  const template = resolveBadgeTemplate(row.nivel_nome, 0, row.tipo_nome);
-  const levelTitle = normalizeLevelTitle(row.nivel_nome) || 'Intermédio';
-  const status = mapPedidoEstadoToMyRequestStatus(row.estado_nome);
-  const resolvedPoints = Number(row.badge_pontos) > 0 ? Number(row.badge_pontos) : template.points;
-
-  await ensureRequirementsForBadges([badgeId]);
-  const requirementsByBadge = await loadRequirementsByBadgeIds([badgeId]);
-  const badgeRequirements = clone(requirementsByBadge.get(badgeId) || []);
-
-  const evidenceRows = await sequelize.query(
-    `
-      SELECT nevidencias, nreq, nevidencia, formato
-      FROM evidencias
-      WHERE npedido = :pedidoId
-      ORDER BY nreq ASC, nevidencias ASC
-    `,
-    {
-      replacements: { pedidoId: parsedPedidoId },
-      type: QueryTypes.SELECT,
-    },
-  );
-
-  const evidenceByReq = new Map();
-  const unscopedAttachments = [];
-
-  for (const erow of evidenceRows) {
-    const requirementId = Number(erow.nreq);
-    const extension = String(erow.formato || '').trim().toLowerCase();
-    const labelBase = String(erow.nevidencia || 'evidencia').trim();
-    const label = extension && !labelBase.toLowerCase().endsWith(`.${extension}`)
-      ? `${labelBase}.${extension}`
-      : labelBase;
-    const attachment = {
-      id: `evidence-${Number(erow.nevidencias) || label}`,
-      evidenceId: Number(erow.nevidencias) || null,
-      type: extension === 'pdf' ? 'pdf' : 'file',
-      label,
-    };
-
-    if (!Number.isInteger(requirementId) || requirementId <= 0) {
-      unscopedAttachments.push(attachment);
-      continue;
-    }
-
-    if (!evidenceByReq.has(requirementId)) {
-      evidenceByReq.set(requirementId, []);
-    }
-
-    evidenceByReq.get(requirementId).push(attachment);
-  }
-
-  for (const requirement of badgeRequirements) {
-    const reqNum = Number(String(requirement.id || '').replace('req-', ''));
-    const attachments = evidenceByReq.get(reqNum) || [];
-    requirement.files = attachments.length;
-    requirement.attachments = attachments;
-  }
-
-  if (badgeRequirements.length > 0 && unscopedAttachments.length > 0) {
-    badgeRequirements[0].files = Number(badgeRequirements[0].files || 0) + unscopedAttachments.length;
-    badgeRequirements[0].attachments = [...(badgeRequirements[0].attachments || []), ...unscopedAttachments];
-  }
-
-  const motiveRows = await sequelize.query(
-    `
-      SELECT
-        m.nutilizador,
-        m.motivo_desc,
-        u.nome AS autor_nome,
-        u.permissoes AS autor_permissoes
-      FROM motivo AS m
-      INNER JOIN utilizador AS u ON u.nutilizador = m.nutilizador
-      WHERE m.npedido = :pedidoId
-    `,
-    {
-      replacements: { pedidoId: parsedPedidoId },
-      type: QueryTypes.SELECT,
-    },
-  );
-
-  let reviewerName = null;
-  let reviewerDate = null;
-  let reviewerNote = null;
-
-  if (motiveRows.length > 0) {
-    const lastMotive = motiveRows[motiveRows.length - 1];
-    reviewerName = lastMotive.autor_nome || null;
-    reviewerNote = lastMotive.motivo_desc || null;
-    reviewerDate = formatShortDate(row.data_submissao);
-  }
 
   return {
-    id: parsedPedidoId,
-    badge: row.b_nome || row.area_nome || 'Badge',
-    levelLabel: `Nível ${levelTitle}`,
-    area: row.lpath_nome || 'Jornada Técnica',
-    path: row.sline_nome || 'Service Line',
-    status,
-    points: resolvedPoints,
-    badgeImage: resolveBadgeImage(row.badge_imagem, template.badgeImage, isSpecial),
-    expiresAt: formatDate(row.validade),
-    submittedBy: row.consultor_nome || 'Utilizador',
-    submissionDate: formatShortDate(row.data_submissao),
-    requirements: badgeRequirements,
-    reviewerName,
-    reviewerDate,
-    reviewerNote,
+    requestId: Number(createdPedido.npedido),
+    badgeId: parsedBadgeId,
+    status: 'pendente',
   };
+};
+
+const getPreferenceAreas = async (accountId) => {
+  const parsedAccountId = Number(accountId);
+  if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) {
+    return [];
+  }
+
+  const rows = await sequelize.query(
+    `
+      SELECT a.narea, a.area, a.a_desc
+      FROM area AS a
+      WHERE a.is_active = TRUE
+      ORDER BY a.area ASC
+    `,
+    { type: QueryTypes.SELECT },
+  );
+
+  const preferences = await Preferencia.findAll({
+    where: { nutilizador: parsedAccountId },
+    attributes: ['narea'],
+    raw: true,
+  });
+
+  const preferenceAreaIds = new Set(preferences.map((p) => Number(p.narea)));
+
+  return (rows || []).map((row) => ({
+    id: Number(row.narea),
+    name: row.area,
+    description: row.a_desc || '',
+    selected: preferenceAreaIds.has(Number(row.narea)),
+  }));
+};
+
+const getPreferences = async (accountId) => {
+  const parsedAccountId = Number(accountId);
+  if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) {
+    return [];
+  }
+
+  const preferences = await Preferencia.findAll({
+    where: { nutilizador: parsedAccountId },
+    attributes: ['narea'],
+    raw: true,
+  });
+
+  return preferences.map((p) => Number(p.narea)).filter((id) => Number.isInteger(id) && id > 0);
+};
+
+const savePreferences = async (accountId, areaIds) => {
+  const parsedAccountId = Number(accountId);
+  if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) {
+    throw new Error('Invalid account id.');
+  }
+
+  await Preferencia.destroy({
+    where: { nutilizador: parsedAccountId },
+  });
+
+  const normalizedAreaIds = [...new Set(
+    (Array.isArray(areaIds) ? areaIds : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value > 0),
+  )];
+
+  for (const areaId of normalizedAreaIds) {
+    await Preferencia.create({
+      nutilizador: parsedAccountId,
+      narea: areaId,
+    });
+  }
+
+  return { saved: true, count: normalizedAreaIds.length };
+};
+
+const getUserVitrine = async (accountId) => {
+  const parsedAccountId = Number(accountId);
+  if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) {
+    return [];
+  }
+
+  const vitrines = await Vitrine.findAll({
+    where: { nutilizador: parsedAccountId },
+    order: [['ordem', 'ASC']],
+    raw: true,
+  });
+
+  if (vitrines.length === 0) {
+    return [];
+  }
+
+  const badgeIds = vitrines.map((v) => Number(v.nbadge)).filter(Boolean);
+  const imageMap = badgeIds.length > 0 ? await loadBadgeImagesBatch(badgeIds) : {};
+
+  const badgeDetails = await Promise.all(
+    vitrines.map(async (v) => {
+      const [row] = await sequelize.query(
+        `
+          SELECT
+            b.nbadge,
+            b.b_nome,
+            b.b_descricao,
+            b.pontos,
+            b.imagem,
+            t.tipo,
+            n.nivel,
+            a.area
+          FROM badge AS b
+          LEFT JOIN tipo AS t ON t.ntipo = b.ntipo
+          LEFT JOIN nivel_contem_b AS ncb ON ncb.nbadge = b.nbadge
+          LEFT JOIN nivel AS n ON n.nnivel = ncb.nnivel
+          LEFT JOIN area AS a ON a.narea = n.narea
+          WHERE b.nbadge = :badgeId
+          LIMIT 1
+        `,
+        {
+          replacements: { badgeId: Number(v.nbadge) },
+          type: QueryTypes.SELECT,
+        },
+      );
+
+      if (!row) return null;
+
+      const isSpecial = isSpecialTypeName(row.tipo);
+      const template = resolveBadgeTemplate(row.nivel, 0, row.tipo);
+
+      return {
+        id: `vitrine-${Number(row.nbadge)}`,
+        badgeDbId: Number(row.nbadge),
+        name: row.b_nome || row.area || 'Badge',
+        points: Number(row.pontos) || template.points,
+        badgeImage: imageMap[Number(row.nbadge)] || resolveBadgeImage(row.imagem, template.badgeImage, isSpecial),
+        levelKey: isSpecial ? 'special' : template.levelKey,
+        isSpecial,
+        ordem: Number(v.ordem) || 0,
+      };
+    }),
+  );
+
+  return badgeDetails.filter(Boolean).sort((a, b) => a.ordem - b.ordem);
+};
+
+const saveUserVitrine = async (accountId, badges) => {
+  const parsedAccountId = Number(accountId);
+  if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) {
+    throw new Error('Invalid account id.');
+  }
+
+  await Vitrine.destroy({
+    where: { nutilizador: parsedAccountId },
+  });
+
+  const normalizedBadges = Array.isArray(badges) ? badges : [];
+
+  for (let index = 0; index < normalizedBadges.length; index += 1) {
+    const badgeId = Number(normalizedBadges[index]?.badgeDbId || normalizedBadges[index]?.id);
+    if (!Number.isInteger(badgeId) || badgeId <= 0) continue;
+
+    await Vitrine.create({
+      nutilizador: parsedAccountId,
+      nbadge: badgeId,
+      ordem: index,
+    });
+  }
+
+  return { saved: true, count: normalizedBadges.length };
 };
 
 export const consultorModel = {
-  async getCatalogBadges(includeExpired = false, accountId = null) {
-    try { await adminBadgeModel.checkAndExpireBadges(); } catch (e) { console.error('Error checking expired badges:', e); }
-    const whereClause = includeExpired ? '' : 'WHERE b.validade IS NULL OR b.validade > CURRENT_DATE';
-    const rawBadges = await sequelize.query(
-      `
-        SELECT
-          b.nbadge,
-          b.b_nome,
-          b.b_descricao,
-          b.pontos,
-          b.imagem,
-          b.validade,
-          t.tipo AS tipo,
-          n.nnivel,
-          a.area,
-          n.nivel,
-          sl.sline
-        FROM badge AS b
-        LEFT JOIN tipo AS t
-          ON b.ntipo = t.ntipo
-        LEFT JOIN nivel_contem_b AS ncb
-          ON b.nbadge = ncb.nbadge
-        LEFT JOIN nivel AS n
-          ON ncb.nnivel = n.nnivel
-        LEFT JOIN area AS a
-          ON n.narea = a.narea
-        LEFT JOIN service_line AS sl
-          ON a.nsline = sl.nsline
-        ${whereClause}
-        ORDER BY b.nbadge ASC
-      `,
-      { type: QueryTypes.SELECT }
-    );
-
-    let userObtainedMap = new Map();
-    let userRequestMap = new Map();
-
-    if (accountId) {
-      const utilizadorId = Number(accountId);
-      const [obtainedRows, requestRows] = await Promise.all([
-        sequelize.query(
-          `
-            SELECT cb.nbadge
-            FROM c_obtem_b AS cb
-            INNER JOIN badge AS b ON b.nbadge = cb.nbadge
-            WHERE cb.nutilizador = :utilizadorId
-              AND (b.validade IS NULL OR b.validade > CURRENT_DATE)
-          `,
-          { replacements: { utilizadorId }, type: QueryTypes.SELECT }
-        ),
-        sequelize.query(
-          `
-            SELECT DISTINCT ON (p.nbadge)
-              p.nbadge,
-              e.estado
-            FROM pedidos AS p
-            INNER JOIN estado AS e ON e.nestado = p.estado
-            INNER JOIN badge AS b ON b.nbadge = p.nbadge
-            WHERE p.nutilizador = :utilizadorId
-              AND (b.validade IS NULL OR b.validade > CURRENT_DATE)
-            ORDER BY p.nbadge, p.data_submissao DESC, p.npedido DESC
-          `,
-          { replacements: { utilizadorId }, type: QueryTypes.SELECT }
-        ),
-      ]);
-
-      for (const row of obtainedRows) {
-        userObtainedMap.set(Number(row.nbadge), true);
-      }
-      for (const row of requestRows) {
-        userRequestMap.set(Number(row.nbadge), row.estado);
-      }
-    }
-
-    const items = rawBadges.map((row) => {
-      const isSpecial = isSpecialTypeName(row.tipo);
-      const template = resolveBadgeTemplate(row.nivel, 0, row.tipo);
-      const resolvedPoints = Number(row.pontos) > 0 ? Number(row.pontos) : template.points;
-      const name = row.b_nome || row.area || 'Badge';
-      const badgeId = Number(row.nbadge);
-
-      let stateId = 'candidatura_aberta';
-      let status = 'visualizar';
-
-      if (accountId) {
-        if (userObtainedMap.has(badgeId)) {
-          stateId = 'aprovado';
-          status = 'obtido';
-        } else if (userRequestMap.has(badgeId)) {
-          const estado = userRequestMap.get(badgeId);
-          stateId = mapPedidoEstadoToMyBadgeState(estado);
-          status = mapPedidoEstadoToMyRequestStatus(estado);
-        }
-      }
-
-      return {
-        id: `badge-${row.nbadge}`,
-        badgeDbId: badgeId,
-        levelId: row.nnivel ? Number(row.nnivel) : null,
-        area: row.area || row.b_nome || 'Diversos',
-        name,
-        description: row.b_descricao || '',
-        stateId,
-        status,
-        levelKey: isSpecial ? null : template.levelKey,
-        typeId: isSpecial ? 'special' : template.levelKey,
-        isSpecial,
-        points: resolvedPoints,
-        badgeImage: resolveBadgeImage(row.imagem, template.badgeImage, isSpecial),
-        learningPathName: 'Jornada Técnica',
-        serviceLineName: row.sline || 'Application Operations',
-        validade: row.validade || null,
-      };
-    });
-
-    const badgeIds = items.map((item) => item.badgeDbId).filter(Boolean);
-    const imageMap = await loadBadgeImagesBatch(badgeIds);
-
-    for (const item of items) {
-      if (imageMap[item.badgeDbId]) {
-        item.badgeImage = imageMap[item.badgeDbId];
-      }
-    }
-
-    return items;
-  },
-
-  async getLearningPaths(accountId) {
-    const data = await buildLearningPaths(accountId);
-    return clone(data);
-  },
-
-  async getMyBadges(accountId) {
-    const data = await buildMyBadges(accountId);
-    return clone(data);
-  },
-
-  async requestBadgeAcquisition(accountId, badgeId) {
-    const data = await requestBadgeAcquisition(accountId, badgeId);
-    return clone(data);
-  },
-
-  async getPreferenceAreas(accountId) {
-    const data = await buildPreferenceAreas(accountId);
-    return clone(data);
-  },
-
-  async getPreferences(accountId) {
-    const data = await buildUserPreferences(accountId);
-    return clone(data);
-  },
-
-  async savePreferences(accountId, areaIds) {
-    const data = await saveUserPreferences(accountId, areaIds);
-    return clone(data);
-  },
-
-  async getBadgeSuggestions(accountId, limit) {
-    const data = await buildBadgeSuggestions(accountId, limit);
-    return clone(data);
-  },
-
-  async getMyRequests(accountId) {
-    const data = await buildMyRequests(accountId);
-    return clone(data);
-  },
-
-  async getPedidoDetail(accountId, pedidoId) {
-    const data = await getPedidoDetail(accountId, pedidoId);
-    return data ? clone(data) : null;
-  },
-
-  async getRankingConsultores() {
-    const data = await buildRankingConsultores();
-    return clone(data);
-  },
-
-  async getReminders(accountId) {
-    const reminders = await Reminder.findAll({
-      where: { accountId: Number(accountId) },
-      order: [['date', 'ASC']],
-    });
-
-    return reminders.map(mapReminder);
-  },
-
-  async createReminder(accountId, payload) {
-    const reminder = await Reminder.create({
-      accountId: Number(accountId),
-      title: payload.title.trim(),
-      description: payload.description.trim(),
-      date: payload.date,
-      color: payload.color,
-    });
-    return mapReminder(reminder);
-  },
-
-  async updateReminder(id, accountId, payload) {
-    const reminder = await Reminder.findOne({ where: { id: Number(id), accountId: Number(accountId) } });
-    if (!reminder) {
-      return null;
-    }
-
-    await reminder.update({
-      title: payload.title.trim(),
-      description: payload.description.trim(),
-      date: payload.date,
-      color: payload.color,
-    });
-
-    return mapReminder(reminder);
-  },
-
-  async deleteReminder(id, accountId) {
-    const deletedRows = await Reminder.destroy({ where: { id: Number(id), accountId: Number(accountId) } });
-    return deletedRows > 0;
-  },
-
-  async getProfileData(accountId) {
-    const data = await buildProfileData(accountId);
-    return clone(data);
-  },
-
-  async updateProfileData(accountId, updates) {
-    const fields = {};
-    if (typeof updates.nome === 'string') {
-      fields.nome = updates.nome.trim();
-    }
-    if (typeof updates.localizacao === 'string') {
-      fields.localizacao = updates.localizacao.trim();
-    }
-    if (Object.keys(fields).length === 0) {
-      return { updated: false };
-    }
-    await Account.update(fields, { where: { id: Number(accountId) } });
-    return { updated: true };
-  },
-
-  async getUserVitrine(accountId) {
-    const parsedAccountId = Number(accountId);
-    if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) return [];
-
-    const rows = await sequelize.query(
-      `
-        SELECT v.nbadge, v.ordem, b.b_nome, b.b_descricao, b.pontos, b.imagem, b.validade, t.tipo,
-               n.nivel
-        FROM vitrine AS v
-        INNER JOIN badge AS b ON b.nbadge = v.nbadge
-        LEFT JOIN tipo AS t ON t.ntipo = b.ntipo
-        LEFT JOIN nivel_contem_b ncb ON ncb.nbadge = b.nbadge
-        LEFT JOIN nivel n ON n.nnivel = ncb.nnivel
-        WHERE v.nutilizador = :accountId
-        ORDER BY v.ordem ASC, v.nbadge ASC
-      `,
-      { replacements: { accountId: parsedAccountId }, type: QueryTypes.SELECT },
-    );
-
-    const badgeIds = rows.map((r) => Number(r.nbadge)).filter(Boolean);
-    const imageMap = await loadBadgeImagesBatch(badgeIds);
-
-    return rows.map((row) => {
-      const nbadge = Number(row.nbadge);
-      return {
-        nbadge,
-        ordem: Number(row.ordem) || 0,
-        b_nome: row.b_nome,
-        pontos: Number(row.pontos) || 0,
-        imagem: imageMap[nbadge] || row.imagem || null,
-        validade: row.validade || null,
-        tipo: row.tipo || null,
-        nivel: row.nivel || null,
-      };
-    });
-  },
-
-  async saveUserVitrine(accountId, badgeEntries) {
-    const parsedAccountId = Number(accountId);
-    if (!Number.isInteger(parsedAccountId) || parsedAccountId <= 0) return [];
-
-    return sequelize.transaction(async (transaction) => {
-      await sequelize.query(
-        'DELETE FROM vitrine WHERE nutilizador = :accountId',
-        { replacements: { accountId: parsedAccountId }, type: QueryTypes.DELETE, transaction },
-      );
-
-      for (const entry of (Array.isArray(badgeEntries) ? badgeEntries : [])) {
-        const badgeId = Number(entry.nbadge);
-        const ordem = Number(entry.ordem) || 0;
-        if (!Number.isInteger(badgeId) || badgeId <= 0) continue;
-
-        await sequelize.query(
-          `INSERT INTO vitrine (nutilizador, nbadge, ordem)
-           VALUES (:accountId, :badgeId, :ordem)
-           ON CONFLICT (nutilizador, nbadge) DO UPDATE SET ordem = EXCLUDED.ordem`,
-          {
-            replacements: { accountId: parsedAccountId, badgeId, ordem },
-            type: QueryTypes.INSERT,
-            transaction,
-          },
-        );
-      }
-
-      return consultorModel.getUserVitrine(parsedAccountId);
-    });
-  },
-
-  async saveEvidences(accountId, pedidoId, nreq, fileMeta) {
-    const data = await saveEvidences(accountId, pedidoId, nreq, fileMeta);
-    return clone(data);
-  },
-
-  async getBadgeRequirements(badgeId) {
-    const parsedBadgeId = Number(badgeId);
-    if (!Number.isInteger(parsedBadgeId) || parsedBadgeId <= 0) {
-      return [];
-    }
-
-    const [badgeRow] = await sequelize.query(
-      `
-        SELECT t.tipo
-        FROM badge AS b
-        LEFT JOIN tipo AS t
-          ON t.ntipo = b.ntipo
-        WHERE b.nbadge = :badgeId
-        LIMIT 1
-      `,
-      {
-        replacements: { badgeId: parsedBadgeId },
-        type: QueryTypes.SELECT,
-      },
-    );
-
-    if (badgeRow && isSpecialTypeName(badgeRow.tipo)) {
-      const specialRequirementsByBadge = await loadSpecialRequirementsByBadgeIds([parsedBadgeId]);
-      const specialRequirements = specialRequirementsByBadge.get(parsedBadgeId) || [];
-
-      if (specialRequirements.length > 0) {
-        return specialRequirements;
-      }
-
-      return [];
-    }
-
-    const rows = await sequelize.query(
-      `
-        SELECT nreq, requisito, r_descricao, imagem
-        FROM requisitos
-        WHERE nbadge = :badgeId
-        ORDER BY nreq ASC
-      `,
-      {
-        replacements: { badgeId: parsedBadgeId },
-        type: QueryTypes.SELECT,
-      },
-    );
-
-    return rows.map((row) => ({
-      id: `req-${Number(row.nreq)}`,
-      title: row.requisito || 'Requisito',
-      description: row.r_descricao || 'Texto de suporte do requisito associado a candidatura.',
-      image: row.imagem || null,
-      files: 0,
-      attachments: [],
-    }));
-  },
-
-  sendAllExpirationNotifications,
-  resolveBadgeImage,
+  syncSpecialBadgesForConsultor,
+  syncSpecialBadgesForAllConsultors,
   resolveBadgeTemplate,
+  resolveBadgeImage,
   isSpecialTypeName,
+  sendAllExpirationNotifications,
+  getProfileData,
+  updateProfileData,
+  getRankingConsultores,
+  getReminders,
+  createReminder,
+  updateReminder,
+  deleteReminder,
+  getPedidoDetail,
+  saveEvidences,
+  getBadgeRequirements,
+  getCatalogBadges,
+  requestBadgeAcquisition,
+  getPreferenceAreas,
+  getPreferences,
+  savePreferences,
+  getUserVitrine,
+  saveUserVitrine,
+  getBadgeSuggestions,
+  getLearningPaths: buildLearningPaths,
+  getMyBadges: buildMyBadges,
+  getMyRequests: buildMyRequests,
 };

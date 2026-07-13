@@ -1,6 +1,7 @@
 import { adminBadgeService } from '../services/adminBadgeService.js';
 import { adminLearningPathService } from '../services/adminLearningPathService.js';
 import { adminBadgeModel } from '../models/adminBadgeModel.js';
+import { syncSpecialBadgesForAllConsultors } from '../models/consultorModel.js';
 
 const specialTriggerTypes = new Set(['badge_count', 'ranking_position', 'streak_days']);
 const MAX_BADGE_IMAGE_LENGTH = 2_500_000;
@@ -242,6 +243,12 @@ export const createBadge = async (req, res) => {
     }
 
     res.status(201).json(toBadgeResponse(row));
+
+    if (specialFlag) {
+      syncSpecialBadgesForAllConsultors().catch((error) => {
+        console.error('Failed to sync special badges after creation.', error);
+      });
+    }
   } catch (error) {
     res.status(500).json({ message: error?.message || 'Failed to create badge.' });
   }
@@ -332,6 +339,12 @@ export const updateBadge = async (req, res) => {
     }
 
     res.status(200).json(toBadgeResponse(row));
+
+    if (specialFlag) {
+      syncSpecialBadgesForAllConsultors().catch((error) => {
+        console.error('Failed to sync special badges after update.', error);
+      });
+    }
   } catch (error) {
     res.status(500).json({ message: error?.message || 'Failed to update badge.' });
   }
@@ -346,5 +359,3 @@ export const getExpiringSoonBadges = async (req, res) => {
     res.status(500).json({ message: error?.message || 'Failed to fetch expiring badges.' });
   }
 };
-
-

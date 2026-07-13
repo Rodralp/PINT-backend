@@ -857,3 +857,203 @@ export const getDetalhesServiceLineTM = async (req, res) => {
     res.status(500).json({ message: error?.message || 'Failed to fetch service line details.' });
   }
 };
+
+// Histórico por Estado - Talent Manager (todas as service lines)
+export const getHistoricoPorEstadoTM = async (req, res) => {
+  const estado = req.query?.estado;
+  const type = req.path.includes('service-line') ? 'serviceLine' :
+               req.path.includes('area') ? 'area' :
+               req.path.includes('badge') ? 'badge' : 'consultor';
+
+  const estadoMap = {
+    'pendente': 3,
+    'aceite': 4,
+    'rejeitado': 1,
+  };
+
+  const dbEstadoId = estadoMap[estado] || estado;
+
+  if (!estado) {
+    res.status(400).json({ message: 'Estado is required.' });
+    return;
+  }
+
+  try {
+    let data = [];
+
+    if (type === 'serviceLine') {
+      const serviceLineId = parsePositiveId(req.query?.serviceLineId);
+      if (!serviceLineId) {
+        res.status(400).json({ message: 'Service line id is required.' });
+        return;
+      }
+
+      const rows = await sequelize.query(
+        `
+        SELECT
+          p.npedido AS id,
+          sl.sline AS name,
+          b.b_nome AS descricao,
+          TO_CHAR(p.data_submissao, 'YYYY-MM-DD') AS data,
+          e.estado
+        FROM pedidos p
+        INNER JOIN badge b ON b.nbadge = p.nbadge
+        INNER JOIN b_pertence_sl bps ON bps.nbadge = b.nbadge AND bps.nsline = :serviceLineId
+        INNER JOIN service_line sl ON sl.nsline = bps.nsline
+        INNER JOIN estado e ON e.nestado = p.estado
+        WHERE p.estado = :dbEstadoId
+        ORDER BY p.data_submissao DESC
+        `,
+        {
+          replacements: { serviceLineId, dbEstadoId },
+          type: QueryTypes.SELECT,
+        },
+      );
+      data = rows.map(row => ({
+        ...row,
+        estado: mapWorkflowStatusToUi(row.estado),
+      }));
+
+    } else if (type === 'area') {
+      const areaId = parsePositiveId(req.query?.areaId);
+      if (!areaId) {
+        res.status(400).json({ message: 'Area id is required.' });
+        return;
+      }
+
+      const rows = await sequelize.query(
+        `
+        SELECT
+          p.npedido AS id,
+          a.area AS name,
+          b.b_nome AS badge,
+          u.nome AS consultor,
+          TO_CHAR(p.data_submissao, 'YYYY-MM-DD') AS data,
+          e.estado
+        FROM pedidos p
+        INNER JOIN badge b ON b.nbadge = p.nbadge
+        INNER JOIN area a ON a.narea = b.narea
+        INNER JOIN utilizador u ON u.nutilizador = p.nutilizador
+        INNER JOIN estado e ON e.nestado = p.estado
+        WHERE a.narea = :areaId
+          AND p.estado = :dbEstadoId
+        ORDER BY p.data_submissao DESC
+        `,
+        {
+          replacements: { areaId, dbEstadoId },
+          type: QueryTypes.SELECT,
+        },
+      );
+      data = rows.map(row => ({
+        ...row,
+        estado: mapWorkflowStatusToUi(row.estado),
+      }));
+
+    } else if (type === 'badge') {
+      const badgeId = parsePositiveId(req.query?.badgeId);
+      if (!badgeId) {
+        res.status(400).json({ message: 'Badge id is required.' });
+        return;
+      }
+
+      const rows = await sequelize.query(
+        `
+        SELECT
+          p.npedido AS id,
+          b.b_nome AS name,
+          u.nome AS consultor,
+          TO_CHAR(p.data_submissao, 'YYYY-MM-DD') AS data,
+          e.estado
+        FROM pedidos p
+        INNER JOIN badge b ON b.nbadge = p.nbadge
+        INNER JOIN utilizador u ON u.nutilizador = p.nutilizador
+        INNER JOIN estado e ON e.nestado = p.estado
+        WHERE b.nbadge = :badgeId
+          AND p.estado = :dbEstadoId
+        ORDER BY p.data_submissao DESC
+        `,
+        {
+          replacements: { badgeId, dbEstadoId },
+          type: QueryTypes.SELECT,
+        },
+      );
+      data = rows.map(row => ({
+        ...row,
+        estado: mapWorkflowStatusToUi(row.estado),
+      }));
+
+    } else if (type === 'consultor') {
+      const consultorId = parsePositiveId(req.query?.consultorId);
+      if (!consultorId) {
+        res.status(400).json({ message: 'Consultor id is required.' });
+        return;
+      }
+
+      const rows = await sequelize.query(
+        `
+        SELECT
+          p.npedido AS id,
+          u.nome AS name,
+          b.b_nome AS badge,
+          TO_CHAR(p.data_submissao, 'YYYY-MM-DD') AS data,
+          e.estado
+        FROM pedidos p
+        INNER JOIN badge b ON b.nbadge = p.nbadge
+        INNER JOIN utilizador u ON u.nutilizador = p.nutilizador
+        INNER JOIN estado e ON e.nestado = p.estado
+        WHERE p.nutilizador = :consultorId
+          AND p.estado = :dbEstadoId
+        ORDER BY p.data_submissao DESC
+        `,
+        {
+          replacements: { consultorId, dbEstadoId },
+          type: QueryTypes.SELECT,
+        },
+      );
+      data = rows.map(row => ({
+        ...row,
+        estado: mapWorkflowStatusToUi(row.estado),
+      }));
+    }
+
+    res.status(200).json(data);
+  } catch (error) {
+    res.status(500).json({ message: error?.message || 'Failed to fetch historico por estado.' });
+  }
+};
+
+// Histórico de Candidatura - Talent Manager
+export const getHistoricoCandidaturaTM = async (req, res) => {
+  const pedidoId = parsePositiveId(req.query?.pedidoId);
+
+  if (!pedidoId) {
+    res.status(400).json({ message: 'Pedido id is required.' });
+    return;
+  }
+
+  try {
+    const rows = await sequelize.query(
+      `
+        SELECT
+          ph.nhistorico AS id,
+          e.estado,
+          COALESCE(u.nome, 'Sistema') AS "utilizadorNome",
+          ph.data_estado AS "dataEstado",
+          ph.descricao
+        FROM pedido_historico ph
+        INNER JOIN estado e ON e.nestado = ph.nestado
+        LEFT JOIN utilizador u ON u.nutilizador = ph.nutilizador
+        WHERE ph.npedido = :pedidoId
+        ORDER BY ph.data_estado ASC
+      `,
+      {
+        replacements: { pedidoId },
+        type: QueryTypes.SELECT,
+      },
+    );
+
+    res.status(200).json(rows);
+  } catch (error) {
+    res.status(500).json({ message: error?.message || 'Failed to fetch candidacy history.' });
+  }
+};

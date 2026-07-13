@@ -2,6 +2,18 @@ import { QueryTypes } from 'sequelize';
 import fs from 'node:fs';
 import path from 'node:path';
 import { sequelize } from '../config/database.js';
+import { Account } from './sql/Account.js';
+import { Estado } from './sql/Estado.js';
+import { Requisito } from './sql/Requisito.js';
+import { Evidencia } from './sql/Evidencia.js';
+import { Motivo } from './sql/Motivo.js';
+import { Pedido } from './sql/Pedido.js';
+import { CObtemBadge } from './sql/CObtemBadge.js';
+import { Badge } from './sql/Badge.js';
+import { TmGereP } from './sql/TmGereP.js';
+import { SllGereP } from './sql/SllGereP.js';
+import { AdmGereP } from './sql/AdmGereP.js';
+import { PedidoHistorico } from './sql/PedidoHistorico.js';
 import { syncSpecialBadgesForConsultor } from './consultorModel.js';
 import { communicationModel } from './communicationModel.js';
 import { sendEmail } from '../services/emailService.js';
@@ -66,6 +78,24 @@ const autoRejectExpiredRequests = async () => {
         defaultDescription: AUTO_REJECTION_NOTE,
       },
       type: QueryTypes.UPDATE,
+    },
+  );
+
+  await sequelize.query(
+    `
+      INSERT INTO pedido_historico (npedido, nestado, nutilizador, data_estado, descricao)
+      SELECT npedido, :rejectedId, NULL, NOW(), :defaultDescription
+      FROM pedidos
+      WHERE data_limite IS NOT NULL
+        AND data_limite <= CURRENT_DATE
+        AND estado = :rejectedId
+    `,
+    {
+      replacements: {
+        rejectedId: rejectedEstadoId,
+        defaultDescription: AUTO_REJECTION_NOTE,
+      },
+      type: QueryTypes.INSERT,
     },
   );
 };
@@ -379,81 +409,33 @@ const shouldRoleReviewRequest = (role, estadoNome) => {
   return false;
 };
 const getUtilizadorIdByAccountId = async (accountId) => {
-  const [utilizador] = await sequelize.query(
-    `
-      SELECT nutilizador
-      FROM utilizador
-      WHERE nutilizador = :accountId
-      LIMIT 1
-    `,
-    {
-      replacements: { accountId: Number(accountId) },
-      type: QueryTypes.SELECT,
-    },
-  );
-
-  return utilizador?.nutilizador ? Number(utilizador.nutilizador) : null;
+  const account = await Account.findByPk(Number(accountId), { attributes: ['id'] });
+  return account?.id ? Number(account.id) : null;
 };
 
 const ensureEstadoId = async (estadoNome) => {
-  const [existing] = await sequelize.query(
-    `
-      SELECT nestado
-      FROM estado
-      WHERE LOWER(estado) = LOWER(:estadoNome)
-      LIMIT 1
-    `,
-    {
-      replacements: { estadoNome },
-      type: QueryTypes.SELECT,
-    },
-  );
+  const [existing] = await Estado.findOrCreate({
+    where: { estado: estadoNome },
+    defaults: { estado: estadoNome },
+  });
 
-  if (existing?.nestado) {
-    return Number(existing.nestado);
-  }
-
-  const [inserted] = await sequelize.query(
-    `
-      INSERT INTO estado (estado)
-      VALUES (:estadoNome)
-      RETURNING nestado
-    `,
-    {
-      replacements: { estadoNome },
-      type: QueryTypes.SELECT,
-    },
-  );
-
-  return Number(inserted.nestado);
+  return Number(existing.nestado);
 };
 
 const buildRequirements = async (pedidoId, badgeId, levelName) => {
   const [requirementsRows, evidenceRows] = await Promise.all([
-    sequelize.query(
-      `
-        SELECT nreq, requisito, r_descricao, imagem
-        FROM requisitos
-        WHERE nbadge = :badgeId
-        ORDER BY nreq ASC
-      `,
-      {
-        replacements: { badgeId: Number(badgeId) },
-        type: QueryTypes.SELECT,
-      },
-    ),
-    sequelize.query(
-      `
-        SELECT nevidencias, nreq, nevidencia, formato
-        FROM evidencias
-        WHERE npedido = :pedidoId
-        ORDER BY nreq ASC, nevidencias ASC
-      `,
-      {
-        replacements: { pedidoId: Number(pedidoId) },
-        type: QueryTypes.SELECT,
-      },
-    ),
+    Requisito.findAll({
+      where: { nbadge: Number(badgeId) },
+      attributes: ['nreq', 'requisito', 'r_descricao', 'imagem'],
+      order: [['nreq', 'ASC']],
+      raw: true,
+    }),
+    Evidencia.findAll({
+      where: { npedido: Number(pedidoId) },
+      attributes: ['nevidencias', 'nreq', 'nevidencia', 'formato'],
+      order: [['nreq', 'ASC'], ['nevidencias', 'ASC']],
+      raw: true,
+    }),
   ]);
 
   const evidenceByReq = new Map();
@@ -689,32 +671,26 @@ const mapRequestListItem = (row, role) => {
 };
 
 const fetchRequestMotives = async (requestId) => {
-  const rows = await sequelize.query(
-    `
-      SELECT
-        m.nutilizador,
-        m.motivo_desc,
-        u.nome AS autor_nome,
-        u.permissoes AS autor_permissoes
-      FROM motivo AS m
-      INNER JOIN utilizador AS u
-        ON u.nutilizador = m.nutilizador
-      WHERE m.npedido = :requestId
-    `,
-    {
-      replacements: { requestId: Number(requestId) },
-      type: QueryTypes.SELECT,
-    },
-  );
+  const rows = await Motivo.findAll({
+    where: { npedido: Number(requestId) },
+    attributes: ['nutilizador', 'motivo_desc'],
+    include: [{
+      model: Account,
+      as: 'utilizador',
+      attributes: ['nome', 'permissoes'],
+    }],
+    raw: true,
+    nest: true,
+  });
 
   return rows
     .map((row) => {
-      const roleKey = getRoleKeyFromPermissions(row.autor_permissoes);
+      const roleKey = getRoleKeyFromPermissions(row.utilizador?.permissoes);
       const reason = String(row.motivo_desc || '').trim();
 
       return {
         authorId: Number(row.nutilizador),
-        authorName: row.autor_nome || 'Utilizador',
+        authorName: row.utilizador?.nome || 'Utilizador',
         authorRole: getRoleLabel(roleKey),
         roleKey,
         reason,
@@ -840,68 +816,35 @@ const ensureRoleAccessToRequest = async (role, actorUtilizadorId, request) => {
 
 const insertManagerOwnership = async (role, actorUtilizadorId, requestId) => {
   if (role === 'talent-manager') {
-    await sequelize.query(
-      `
-        INSERT INTO tm_gere_p (tm_nutilizador, npedido)
-        VALUES (:actorUtilizadorId, :requestId)
-        ON CONFLICT (tm_nutilizador, npedido) DO NOTHING
-      `,
-      {
-        replacements: { actorUtilizadorId: Number(actorUtilizadorId), requestId: Number(requestId) },
-        type: QueryTypes.INSERT,
-      },
-    );
+    await TmGereP.upsert({
+      tm_nutilizador: Number(actorUtilizadorId),
+      npedido: Number(requestId),
+    });
     return;
   }
 
   if (role === 'service-line-leader') {
-    await sequelize.query(
-      `
-        INSERT INTO sll_gere_p (ser_nutilizador, npedido)
-        VALUES (:actorUtilizadorId, :requestId)
-        ON CONFLICT (ser_nutilizador, npedido) DO NOTHING
-      `,
-      {
-        replacements: { actorUtilizadorId: Number(actorUtilizadorId), requestId: Number(requestId) },
-        type: QueryTypes.INSERT,
-      },
-    );
+    await SllGereP.upsert({
+      ser_nutilizador: Number(actorUtilizadorId),
+      npedido: Number(requestId),
+    });
     return;
   }
 
   if (role === 'admin-gestor') {
-    await sequelize.query(
-      `
-        INSERT INTO adm_gere_p (adm_nutilizador, npedido)
-        VALUES (:actorUtilizadorId, :requestId)
-        ON CONFLICT (adm_nutilizador, npedido) DO NOTHING
-      `,
-      {
-        replacements: { actorUtilizadorId: Number(actorUtilizadorId), requestId: Number(requestId) },
-        type: QueryTypes.INSERT,
-      },
-    );
+    await AdmGereP.upsert({
+      adm_nutilizador: Number(actorUtilizadorId),
+      npedido: Number(requestId),
+    });
   }
 };
 
 const upsertRequestMotivo = async ({ requestId, actorUtilizadorId, description, transaction }) => {
-  await sequelize.query(
-    `
-      INSERT INTO motivo (npedido, nutilizador, motivo_desc)
-      VALUES (:requestId, :actorUtilizadorId, :description)
-      ON CONFLICT (nutilizador, npedido)
-      DO UPDATE SET motivo_desc = EXCLUDED.motivo_desc
-    `,
-    {
-      replacements: {
-        requestId: Number(requestId),
-        actorUtilizadorId: Number(actorUtilizadorId),
-        description,
-      },
-      type: QueryTypes.INSERT,
-      transaction,
-    },
-  );
+  await Motivo.upsert({
+    npedido: Number(requestId),
+    nutilizador: Number(actorUtilizadorId),
+    motivo_desc: description,
+  }, { transaction });
 };
 
 const applyDecision = async ({ role, actorUtilizadorId, request, decision, comment }) => {
@@ -993,23 +936,18 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
   const transaction = await sequelize.transaction();
 
   try {
-    await sequelize.query(
-      `
-        UPDATE pedidos
-        SET estado = :estadoId,
-            descricao = :descricao
-        WHERE npedido = :requestId
-      `,
-      {
-        replacements: {
-          estadoId: targetEstadoId,
-          descricao: finalDescription,
-          requestId: Number(request.npedido),
-        },
-        type: QueryTypes.UPDATE,
-        transaction,
-      },
+    await Pedido.update(
+      { estado: targetEstadoId, descricao: finalDescription },
+      { where: { npedido: Number(request.npedido) }, transaction },
     );
+
+    await PedidoHistorico.create({
+      npedido: Number(request.npedido),
+      nestado: targetEstadoId,
+      nutilizador: actorUtilizadorId || null,
+      data_estado: new Date(),
+      descricao: finalDescription,
+    }, { transaction });
 
     await upsertRequestMotivo({
       requestId: request.npedido,
@@ -1019,89 +957,47 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
     });
 
     if (shouldRemoveEvidence) {
-      const evidenceRows = await sequelize.query(
-        `
-          SELECT nevidencia
-          FROM evidencias
-          WHERE npedido = :requestId
-        `,
-        {
-          replacements: { requestId: Number(request.npedido) },
-          type: QueryTypes.SELECT,
-          transaction,
-        },
-      );
+      const evidenceRows = await Evidencia.findAll({
+        where: { npedido: Number(request.npedido) },
+        attributes: ['nevidencia'],
+        transaction,
+        raw: true,
+      });
 
       evidenceFilesToDelete.push(
         ...evidenceRows.map((row) => row?.nevidencia).filter(Boolean),
       );
 
-      await sequelize.query(
-        `
-          DELETE FROM evidencias
-          WHERE npedido = :requestId
-        `,
-        {
-          replacements: { requestId: Number(request.npedido) },
-          type: QueryTypes.DELETE,
-          transaction,
-        },
-      );
+      await Evidencia.destroy({
+        where: { npedido: Number(request.npedido) },
+        transaction,
+      });
     }
 
     if (shouldRemoveBadge) {
-      await sequelize.query(
-        `
-          DELETE FROM c_obtem_b
-          WHERE nutilizador = :consultorId AND nbadge = :badgeId
-        `,
-        {
-          replacements: {
-            consultorId,
-            badgeId: Number(request.nbadge),
-          },
-          type: QueryTypes.DELETE,
-          transaction,
+      await CObtemBadge.destroy({
+        where: {
+          nutilizador: consultorId,
+          nbadge: Number(request.nbadge),
         },
-      );
+        transaction,
+      });
     } else if (shouldObtainBadge) {
-      const [badgePointsRow] = await sequelize.query(
-        `
-          SELECT COALESCE(NULLIF(pontos, 0), 100) AS pontos
-          FROM badge
-          WHERE nbadge = :badgeId
-          LIMIT 1
-        `,
-        {
-          replacements: { badgeId: Number(request.nbadge) },
-          type: QueryTypes.SELECT,
-          transaction,
-        },
-      );
+      const badgeRow = await Badge.findByPk(Number(request.nbadge), {
+        attributes: ['pontos'],
+        transaction,
+        raw: true,
+      });
 
-      const points = Number(badgePointsRow?.pontos) || 100;
+      const points = (Number(badgeRow?.pontos) || 0) > 0 ? Number(badgeRow.pontos) : 100;
 
-      await sequelize.query(
-        `
-          INSERT INTO c_obtem_b (nutilizador, nbadge, npedido, pontos_obtidos, data_obtencao)
-          VALUES (:consultorId, :badgeId, :requestId, :points, CURRENT_DATE)
-          ON CONFLICT (nutilizador, nbadge)
-          DO UPDATE SET
-            npedido = EXCLUDED.npedido,
-            pontos_obtidos = EXCLUDED.pontos_obtidos,
-            data_obtencao = EXCLUDED.data_obtencao
-        `,
-        {
-          replacements: {
-            consultorId,
-            badgeId: Number(request.nbadge),
-            requestId: Number(request.npedido),
-            points,
-          },
-          type: QueryTypes.INSERT,
-          transaction,
-        },
-      );
+      await CObtemBadge.upsert({
+        nutilizador: consultorId,
+        nbadge: Number(request.nbadge),
+        npedido: Number(request.npedido),
+        pontos_obtidos: points,
+        data_obtencao: new Date(),
+      }, { transaction });
     }
 
     await transaction.commit();
@@ -1145,6 +1041,7 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
           message: `O pedido da badge ${badgeName} para ${consultorName} foi aprovado.`,
           consultorIds: [consultorId],
           serviceLineId,
+          notifyActor: true,
         });
       }
 
@@ -1156,6 +1053,7 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
           message: `O pedido da badge ${badgeName} para ${consultorName} foi rejeitado.`,
           consultorIds: [consultorId],
           serviceLineId,
+          notifyActor: true,
         });
       }
     } catch (error) {
@@ -1164,37 +1062,39 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
 
     // Send email notifications for approval/rejection
     try {
-      const [consultorInfo] = await sequelize.query(
-        'SELECT nome, email FROM utilizador WHERE nutilizador = :consultorId LIMIT 1',
-        {
-          replacements: { consultorId: Number(consultorId) },
-          type: QueryTypes.SELECT,
-        }
-      );
+      const consultorAccount = await Account.findByPk(Number(consultorId), {
+        attributes: ['nome', 'email'],
+      });
       const badgeName = request.badge_nome || request.area_nome || 'Badge';
 
-      if (consultorInfo?.email) {
+      if (consultorAccount?.email) {
         if (shouldNotifyApproval) {
-          await sendEmail({
-            to: consultorInfo.email,
-            subject: 'Pedido Aprovado - PINT',
-            html: emailTemplates.requestApproved({
-              userName: consultorInfo.nome || 'Consultor',
-              badgeName,
-            }),
-          });
+          const emailEnabled = await communicationModel.isEmailEnabledForEvent('Pedido aprovado');
+          if (emailEnabled) {
+            await sendEmail({
+              to: consultorAccount.email,
+              subject: 'Pedido Aprovado - PINT',
+              html: emailTemplates.requestApproved({
+                userName: consultorAccount.nome || 'Consultor',
+                badgeName,
+              }),
+            });
+          }
         }
 
         if (shouldNotifyRejection) {
-          await sendEmail({
-            to: consultorInfo.email,
-            subject: 'Pedido Rejeitado - PINT',
-            html: emailTemplates.requestRejected({
-              userName: consultorInfo.nome || 'Consultor',
-              badgeName,
-              comment: finalDescription,
-            }),
-          });
+          const emailEnabled = await communicationModel.isEmailEnabledForEvent('Pedido rejeitado');
+          if (emailEnabled) {
+            await sendEmail({
+              to: consultorAccount.email,
+              subject: 'Pedido Rejeitado - PINT',
+              html: emailTemplates.requestRejected({
+                userName: consultorAccount.nome || 'Consultor',
+                badgeName,
+                comment: finalDescription,
+              }),
+            });
+          }
         }
       }
     } catch (emailError) {
@@ -1298,22 +1198,14 @@ export const requestManagementModel = {
       throw error;
     }
 
-    const [evidence] = await sequelize.query(
-      `
-        SELECT nevidencias, nevidencia, formato
-        FROM evidencias
-        WHERE nevidencias = :evidenceId
-          AND npedido = :requestId
-        LIMIT 1
-      `,
-      {
-        replacements: {
-          evidenceId: Number(evidenceId),
-          requestId: Number(requestId),
-        },
-        type: QueryTypes.SELECT,
+    const evidence = await Evidencia.findOne({
+      where: {
+        nevidencias: Number(evidenceId),
+        npedido: Number(requestId),
       },
-    );
+      attributes: ['nevidencias', 'nevidencia', 'formato'],
+      raw: true,
+    });
 
     if (!evidence) {
       return null;

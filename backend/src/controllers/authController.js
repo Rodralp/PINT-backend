@@ -83,15 +83,41 @@ export const recoverPassword = async (req, res) => {
   }
 
   try {
-    const exists = await authService.recoverPassword(email);
-    if (!exists) {
+    const accountData = await authService.recoverPassword(email);
+    if (!accountData) {
       res.status(404).json({ message: 'Email not found.' });
       return;
     }
 
-    res.status(200).json({ message: 'Password recovery email sent.' });
+    res.status(200).json({ accountId: accountData.id });
   } catch {
     res.status(500).json({ message: 'Failed to recover password.' });
+  }
+};
+
+export const resetPassword = async (req, res) => {
+  const { email, newPassword } = req.body ?? {};
+
+  if (!email || !newPassword) {
+    res.status(400).json({ message: 'Email and new password are required.' });
+    return;
+  }
+
+  if (typeof newPassword !== 'string' || newPassword.length < 6) {
+    res.status(400).json({ message: 'Password must be at least 6 characters.' });
+    return;
+  }
+
+  try {
+    const account = await authService.resetPassword(email, newPassword);
+    if (!account) {
+      res.status(404).json({ message: 'Email not found.' });
+      return;
+    }
+
+    res.status(200).json(account);
+  } catch {
+    res.status(500).json({ message: 'Failed to reset password.' });
   }
 };
 

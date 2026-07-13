@@ -42,19 +42,3 @@ export const updateRgpdTopics = async (req, res) => {
     res.status(500).json({ message: error?.message || 'Failed to update RGPD topics.' });
   }
 };
-
-export const updateGeneralSettings = async (req, res) => {
-  const rows = getRowsPayload(req.body?.rows);
-
-  if (!rows) {
-    res.status(400).json({ message: 'Rows are required.' });
-    return;
-  }
-
-  try {
-    const settings = await adminGeneralManagementService.updateGeneralSettings(rows);
-    res.status(200).json({ settings });
-  } catch (error) {
-    res.status(500).json({ message: error?.message || 'Failed to update general settings.' });
-  }
-};

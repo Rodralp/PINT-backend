@@ -1,5 +1,20 @@
-import { QueryTypes } from 'sequelize';
+import { QueryTypes, Op } from 'sequelize';
 import { sequelize } from '../config/database.js';
+import { Badge } from './sql/Badge.js';
+import { Tipo } from './sql/Tipo.js';
+import { Account } from './sql/Account.js';
+import { Nivel } from './sql/Nivel.js';
+import { Estado } from './sql/Estado.js';
+import { Requisito } from './sql/Requisito.js';
+import { BadgeTrigger } from './sql/BadgeTrigger.js';
+import { BadgeImagem } from './sql/BadgeImagem.js';
+import { PedidoHistorico } from './sql/PedidoHistorico.js';
+import { NivelContemBadge } from './sql/NivelContemBadge.js';
+import { BadgePertenceArea } from './sql/BadgePertenceArea.js';
+import { BadgePertenceSL } from './sql/BadgePertenceSL.js';
+import { BadgePertenceLP } from './sql/BadgePertenceLP.js';
+import { Pedido } from './sql/Pedido.js';
+import { BadgeExpiracaoLog } from './sql/BadgeExpiracaoLog.js';
 import { communicationModel } from './communicationModel.js';
 
 const SPECIAL_BADGE_TYPE_NAME = 'Especial';
@@ -48,42 +63,21 @@ const saveBadgeImage = async (badgeId, imageDataUrl, transaction) => {
 
   const binaryBuffer = Buffer.from(parsed.base64, 'base64');
 
-  await sequelize.query(
-    `
-      INSERT INTO badge_imagem (nbadge, mime_type, dados, atualizado_em)
-      VALUES (:badgeId, :mimeType, :dados, CURRENT_TIMESTAMP)
-      ON CONFLICT (nbadge) DO UPDATE
-        SET mime_type = EXCLUDED.mime_type,
-            dados = EXCLUDED.dados,
-            atualizado_em = CURRENT_TIMESTAMP
-    `,
-    {
-      replacements: {
-        badgeId,
-        mimeType: parsed.mimeType,
-        dados: binaryBuffer,
-      },
-      type: QueryTypes.INSERT,
-      transaction,
-    },
-  );
+  await BadgeImagem.upsert({
+    nbadge: badgeId,
+    mime_type: parsed.mimeType,
+    dados: binaryBuffer,
+  }, { transaction });
 };
 
 const loadBadgeImage = async (badgeId, transaction) => {
   const options = transaction ? { transaction } : {};
-  const [row] = await sequelize.query(
-    `
-      SELECT mime_type, dados
-      FROM badge_imagem
-      WHERE nbadge = :badgeId
-      LIMIT 1
-    `,
-    {
-      replacements: { badgeId },
-      type: QueryTypes.SELECT,
-      ...options,
-    },
-  );
+  const row = await BadgeImagem.findOne({
+    where: { nbadge: badgeId },
+    attributes: ['mime_type', 'dados'],
+    ...options,
+    raw: true,
+  });
 
   if (!row?.dados) return null;
 
@@ -98,22 +92,12 @@ const loadBadgeImagesBatch = async (badgeIds, transaction) => {
   if (!badgeIds || badgeIds.length === 0) return {};
 
   const options = transaction ? { transaction } : {};
-  const placeholders = badgeIds.map((_, i) => `:id${i}`).join(', ');
-  const replacements = {};
-  badgeIds.forEach((id, i) => { replacements[`id${i}`] = id; });
-
-  const rows = await sequelize.query(
-    `
-      SELECT nbadge, mime_type, dados
-      FROM badge_imagem
-      WHERE nbadge IN (${placeholders})
-    `,
-    {
-      replacements,
-      type: QueryTypes.SELECT,
-      ...options,
-    },
-  );
+  const rows = await BadgeImagem.findAll({
+    where: { nbadge: badgeIds },
+    attributes: ['nbadge', 'mime_type', 'dados'],
+    ...options,
+    raw: true,
+  });
 
   const imageMap = {};
   for (const row of (Array.isArray(rows) ? rows : [])) {
@@ -129,47 +113,21 @@ const loadBadgeImagesBatch = async (badgeIds, transaction) => {
 const deleteBadgeImage = async (badgeId, transaction) => {
   if (!badgeId) return;
   const options = transaction ? { transaction } : {};
-  await sequelize.query(
-    `DELETE FROM badge_imagem WHERE nbadge = :badgeId`,
-    {
-      replacements: { badgeId },
-      type: QueryTypes.DELETE,
-      ...options,
-    },
-  );
+  await BadgeImagem.destroy({
+    where: { nbadge: badgeId },
+    ...options,
+  });
 };
 
-const ensureEstadoId = async (estadoNome) => {
-  const [existing] = await sequelize.query(
-    `
-      SELECT nestado
-      FROM estado
-      WHERE LOWER(estado) = LOWER(:nome)
-      LIMIT 1
-    `,
-    {
-      replacements: { nome: estadoNome },
-      type: QueryTypes.SELECT,
-    },
-  );
+const ensureEstadoId = async (estadoNome, transaction) => {
+  const options = transaction ? { transaction } : {};
+  const [existing] = await Estado.findOrCreate({
+    where: { estado: estadoNome },
+    defaults: { estado: estadoNome },
+    ...options,
+  });
 
-  if (existing?.nestado) {
-    return existing.nestado;
-  }
-
-  const [inserted] = await sequelize.query(
-    `
-      INSERT INTO estado (estado)
-      VALUES (:nome)
-      RETURNING nestado
-    `,
-    {
-      replacements: { nome: estadoNome },
-      type: QueryTypes.SELECT,
-    },
-  );
-
-  return inserted?.nestado;
+  return existing?.nestado;
 };
 
 const resolveUtilizadorId = async (accountId) => {
@@ -178,20 +136,11 @@ const resolveUtilizadorId = async (accountId) => {
     return null;
   }
 
-  const [row] = await sequelize.query(
-    `
-      SELECT nutilizador
-      FROM utilizador
-      WHERE nutilizador = :accountId
-      LIMIT 1
-    `,
-    {
-      replacements: { accountId: parsedAccountId },
-      type: QueryTypes.SELECT,
-    },
-  );
+  const account = await Account.findByPk(parsedAccountId, {
+    attributes: ['id'],
+  });
 
-  return row?.nutilizador || null;
+  return account?.id || null;
 };
 
 const normalizeSpecialRequirements = (requirements) => {
@@ -243,69 +192,37 @@ const normalizeStandardRequirements = (requirements) => {
   return normalized;
 };
 
-const getBadgeTypes = async (transaction) => sequelize.query(
-  `
-    SELECT ntipo, tipo
-    FROM tipo
-    ORDER BY ntipo ASC
-  `,
-  {
-    type: QueryTypes.SELECT,
-    transaction,
-  },
-);
+const getBadgeTypes = async (transaction) => {
+  const options = transaction ? { transaction } : {};
+  const rows = await Tipo.findAll({
+    attributes: ['ntipo', 'tipo'],
+    order: [['ntipo', 'ASC']],
+    ...options,
+    raw: true,
+  });
+  return rows;
+};
 
 const getTypeNameById = async (typeId, transaction) => {
-  const [row] = await sequelize.query(
-    `
-      SELECT tipo
-      FROM tipo
-      WHERE ntipo = :typeId
-      LIMIT 1
-    `,
-    {
-      replacements: { typeId: Number(typeId) },
-      type: QueryTypes.SELECT,
-      transaction,
-    },
-  );
+  const options = transaction ? { transaction } : {};
+  const row = await Tipo.findByPk(Number(typeId), {
+    attributes: ['tipo'],
+    ...options,
+    raw: true,
+  });
 
   return row?.tipo || null;
 };
 
 const ensureSpecialBadgeTypeId = async (transaction) => {
-  const [existing] = await sequelize.query(
-    `
-      SELECT ntipo
-      FROM tipo
-      WHERE LOWER(tipo) = LOWER(:typeName)
-      LIMIT 1
-    `,
-    {
-      replacements: { typeName: SPECIAL_BADGE_TYPE_NAME },
-      type: QueryTypes.SELECT,
-      transaction,
-    },
-  );
+  const options = transaction ? { transaction } : {};
+  const [existing] = await Tipo.findOrCreate({
+    where: { tipo: SPECIAL_BADGE_TYPE_NAME },
+    defaults: { tipo: SPECIAL_BADGE_TYPE_NAME },
+    ...options,
+  });
 
-  if (existing?.ntipo) {
-    return Number(existing.ntipo);
-  }
-
-  const [inserted] = await sequelize.query(
-    `
-      INSERT INTO tipo (tipo)
-      VALUES (:typeName)
-      RETURNING ntipo
-    `,
-    {
-      replacements: { typeName: SPECIAL_BADGE_TYPE_NAME },
-      type: QueryTypes.SELECT,
-      transaction,
-    },
-  );
-
-  return inserted?.ntipo ? Number(inserted.ntipo) : null;
+  return existing?.ntipo ? Number(existing.ntipo) : null;
 };
 
 const resolveBadgeTypeGroup = (value) => {
@@ -413,88 +330,53 @@ const getLevelContext = async (levelId, transaction) => {
 };
 
 const clearBadgeAssociations = async (badgeId, transaction) => {
-  await sequelize.query(
-    'DELETE FROM nivel_contem_b WHERE nbadge = :badgeId',
-    {
-      replacements: { badgeId: Number(badgeId) },
-      type: QueryTypes.DELETE,
-      transaction,
-    },
-  );
+  await NivelContemBadge.destroy({
+    where: { nbadge: Number(badgeId) },
+    transaction,
+  });
 
-  await sequelize.query(
-    'DELETE FROM b_pertence_a WHERE nbadge = :badgeId',
-    {
-      replacements: { badgeId: Number(badgeId) },
-      type: QueryTypes.DELETE,
-      transaction,
-    },
-  );
+  await BadgePertenceArea.destroy({
+    where: { nbadge: Number(badgeId) },
+    transaction,
+  });
 
-  await sequelize.query(
-    'DELETE FROM b_pertence_sl WHERE nbadge = :badgeId',
-    {
-      replacements: { badgeId: Number(badgeId) },
-      type: QueryTypes.DELETE,
-      transaction,
-    },
-  );
+  await BadgePertenceSL.destroy({
+    where: { nbadge: Number(badgeId) },
+    transaction,
+  });
 
-  await sequelize.query(
-    'DELETE FROM b_pertence_lp WHERE nbadge = :badgeId',
-    {
-      replacements: { badgeId: Number(badgeId) },
-      type: QueryTypes.DELETE,
-      transaction,
-    },
-  );
+  await BadgePertenceLP.destroy({
+    where: { nbadge: Number(badgeId) },
+    transaction,
+  });
 };
 
 const replaceBadgeTriggers = async (badgeId, requirements, transaction) => {
-  await sequelize.query(
-    'DELETE FROM badge_trigger WHERE nbadge = :badgeId',
-    {
-      replacements: { badgeId: Number(badgeId) },
-      type: QueryTypes.DELETE,
-      transaction,
-    },
-  );
+  await BadgeTrigger.destroy({
+    where: { nbadge: Number(badgeId) },
+    transaction,
+  });
 
   const normalizedRequirements = normalizeSpecialRequirements(requirements);
 
   for (const requirement of normalizedRequirements) {
-    await sequelize.query(
-      `
-        INSERT INTO badge_trigger (nbadge, trigger_tipo, trigger_valor)
-        VALUES (:badgeId, :triggerType, :triggerValue)
-      `,
-      {
-        replacements: {
-          badgeId: Number(badgeId),
-          triggerType: requirement.type,
-          triggerValue: requirement.value,
-        },
-        type: QueryTypes.INSERT,
-        transaction,
-      },
-    );
+    await BadgeTrigger.create({
+      nbadge: Number(badgeId),
+      trigger_tipo: requirement.type,
+      trigger_valor: requirement.value,
+    }, { transaction });
   }
 };
 
 const loadBadgeTriggers = async (badgeId, transaction) => {
-  const rows = await sequelize.query(
-    `
-      SELECT trigger_tipo, trigger_valor
-      FROM badge_trigger
-      WHERE nbadge = :badgeId
-      ORDER BY trigger_tipo ASC
-    `,
-    {
-      replacements: { badgeId: Number(badgeId) },
-      type: QueryTypes.SELECT,
-      transaction,
-    },
-  );
+  const options = transaction ? { transaction } : {};
+  const rows = await BadgeTrigger.findAll({
+    where: { nbadge: Number(badgeId) },
+    attributes: ['trigger_tipo', 'trigger_valor'],
+    order: [['trigger_tipo', 'ASC']],
+    ...options,
+    raw: true,
+  });
 
   return (rows || []).map((row) => ({
     type: row.trigger_tipo,
@@ -503,19 +385,14 @@ const loadBadgeTriggers = async (badgeId, transaction) => {
 };
 
 const loadBadgeRequirements = async (badgeId, transaction) => {
-  const rows = await sequelize.query(
-    `
-      SELECT nreq, requisito, r_descricao, imagem
-      FROM requisitos
-      WHERE nbadge = :badgeId
-      ORDER BY nreq ASC
-    `,
-    {
-      replacements: { badgeId: Number(badgeId) },
-      type: QueryTypes.SELECT,
-      transaction,
-    },
-  );
+  const options = transaction ? { transaction } : {};
+  const rows = await Requisito.findAll({
+    where: { nbadge: Number(badgeId) },
+    attributes: ['nreq', 'requisito', 'r_descricao', 'imagem'],
+    order: [['nreq', 'ASC']],
+    ...options,
+    raw: true,
+  });
 
   return (rows || []).map((row) => ({
     id: `req-${Number(row.nreq)}`,
@@ -526,34 +403,20 @@ const loadBadgeRequirements = async (badgeId, transaction) => {
 };
 
 const replaceBadgeRequirements = async (badgeId, requirements, transaction) => {
-  await sequelize.query(
-    'DELETE FROM requisitos WHERE nbadge = :badgeId',
-    {
-      replacements: { badgeId: Number(badgeId) },
-      type: QueryTypes.DELETE,
-      transaction,
-    },
-  );
+  await Requisito.destroy({
+    where: { nbadge: Number(badgeId) },
+    transaction,
+  });
 
   const normalizedRequirements = normalizeStandardRequirements(requirements);
 
   for (const requirement of normalizedRequirements) {
-    await sequelize.query(
-      `
-        INSERT INTO requisitos (requisito, r_descricao, imagem, nbadge)
-        VALUES (:title, :description, :image, :badgeId)
-      `,
-      {
-        replacements: {
-          title: requirement.title,
-          description: requirement.description,
-          image: requirement.image,
-          badgeId: Number(badgeId),
-        },
-        type: QueryTypes.INSERT,
-        transaction,
-      },
-    );
+    await Requisito.create({
+      requisito: requirement.title,
+      r_descricao: requirement.description,
+      imagem: requirement.image,
+      nbadge: Number(badgeId),
+    }, { transaction });
   }
 };
 
@@ -562,74 +425,34 @@ const createBadgeAssociations = async (badgeId, levelContext, transaction) => {
     return;
   }
 
-  await sequelize.query(
-    `
-      INSERT INTO nivel_contem_b (nnivel, nbadge)
-      VALUES (:levelId, :badgeId)
-      ON CONFLICT DO NOTHING
-    `,
-    {
-      replacements: {
-        levelId: levelContext.levelId,
-        badgeId: Number(badgeId),
-      },
-      type: QueryTypes.INSERT,
-      transaction,
-    },
-  );
+  await NivelContemBadge.findOrCreate({
+    where: { nnivel: levelContext.levelId, nbadge: Number(badgeId) },
+    defaults: { nnivel: levelContext.levelId, nbadge: Number(badgeId) },
+    transaction,
+  });
 
   if (levelContext.areaId) {
-    await sequelize.query(
-      `
-        INSERT INTO b_pertence_a (narea, nbadge)
-        VALUES (:areaId, :badgeId)
-        ON CONFLICT DO NOTHING
-      `,
-      {
-        replacements: {
-          areaId: levelContext.areaId,
-          badgeId: Number(badgeId),
-        },
-        type: QueryTypes.INSERT,
-        transaction,
-      },
-    );
+    await BadgePertenceArea.findOrCreate({
+      where: { narea: levelContext.areaId, nbadge: Number(badgeId) },
+      defaults: { narea: levelContext.areaId, nbadge: Number(badgeId) },
+      transaction,
+    });
   }
 
   if (levelContext.serviceLineId) {
-    await sequelize.query(
-      `
-        INSERT INTO b_pertence_sl (nsline, nbadge)
-        VALUES (:serviceLineId, :badgeId)
-        ON CONFLICT DO NOTHING
-      `,
-      {
-        replacements: {
-          serviceLineId: levelContext.serviceLineId,
-          badgeId: Number(badgeId),
-        },
-        type: QueryTypes.INSERT,
-        transaction,
-      },
-    );
+    await BadgePertenceSL.findOrCreate({
+      where: { nsline: levelContext.serviceLineId, nbadge: Number(badgeId) },
+      defaults: { nsline: levelContext.serviceLineId, nbadge: Number(badgeId) },
+      transaction,
+    });
   }
 
   if (levelContext.learningPathId) {
-    await sequelize.query(
-      `
-        INSERT INTO b_pertence_lp (nlpath, nbadge)
-        VALUES (:learningPathId, :badgeId)
-        ON CONFLICT DO NOTHING
-      `,
-      {
-        replacements: {
-          learningPathId: levelContext.learningPathId,
-          badgeId: Number(badgeId),
-        },
-        type: QueryTypes.INSERT,
-        transaction,
-      },
-    );
+    await BadgePertenceLP.findOrCreate({
+      where: { nlpath: levelContext.learningPathId, nbadge: Number(badgeId) },
+      defaults: { nlpath: levelContext.learningPathId, nbadge: Number(badgeId) },
+      transaction,
+    });
   }
 };
 
@@ -730,25 +553,14 @@ export const adminBadgeModel = {
       const safeImage = normalizeBadgeImage(badgeImage);
       const safeValidade = validade || null;
 
-      const [badgeRow] = await sequelize.query(
-        `
-          INSERT INTO badge (b_nome, b_descricao, pontos, imagem, ntipo, validade)
-          VALUES (:name, :description, :points, :image, :typeId, :validade)
-          RETURNING nbadge, b_nome, b_descricao, pontos, imagem, ntipo, validade
-        `,
-        {
-          replacements: {
-            name,
-            description,
-            points: safePoints,
-            image: safeImage,
-            typeId: resolvedTypeId,
-            validade: safeValidade,
-          },
-          type: QueryTypes.SELECT,
-          transaction,
-        },
-      );
+      const badgeRow = await Badge.create({
+        b_nome: name,
+        b_descricao: description,
+        pontos: safePoints,
+        imagem: safeImage,
+        ntipo: resolvedTypeId,
+        validade: safeValidade,
+      }, { transaction, returning: true });
 
       if (!badgeRow?.nbadge) {
         return null;
@@ -815,36 +627,28 @@ export const adminBadgeModel = {
       const safeImage = normalizeBadgeImage(badgeImage);
       const safeValidade = validade || null;
 
-      const [badgeRow] = await sequelize.query(
-        `
-          UPDATE badge
-          SET b_nome = :name,
-              b_descricao = :description,
-              pontos = :points,
-              imagem = :image,
-              ntipo = :typeId,
-              validade = :validade
-          WHERE nbadge = :badgeId
-          RETURNING nbadge, b_nome, b_descricao, pontos, imagem, ntipo, validade
-        `,
-        {
-          replacements: {
-            badgeId: parsedBadgeId,
-            name,
-            description,
-            points: safePoints,
-            image: safeImage,
-            typeId: resolvedTypeId,
-            validade: safeValidade,
-          },
-          type: QueryTypes.SELECT,
-          transaction,
-        },
-      );
+      const [updatedRows] = await Badge.update({
+        b_nome: name,
+        b_descricao: description,
+        pontos: safePoints,
+        imagem: safeImage,
+        ntipo: resolvedTypeId,
+        validade: safeValidade,
+      }, {
+        where: { nbadge: parsedBadgeId },
+        returning: true,
+        transaction,
+      });
 
-      if (!badgeRow?.nbadge) {
+      if (!updatedRows) {
         return null;
       }
+
+      const badgeRow = await Badge.findByPk(parsedBadgeId, {
+        attributes: ['nbadge', 'b_nome', 'b_descricao', 'pontos', 'imagem', 'ntipo', 'validade'],
+        transaction,
+        raw: true,
+      });
 
       if (isDataUrl(safeImage)) {
         await saveBadgeImage(parsedBadgeId, safeImage, transaction);
@@ -886,38 +690,26 @@ export const adminBadgeModel = {
       return null;
     }
 
-    const [row, specialRequirements, requirementRows] = await Promise.all([
-      sequelize.query(
-        `
-          SELECT
-            b.nbadge,
-            b.b_nome,
-            b.b_descricao,
-            b.pontos,
-            b.imagem,
-            b.ntipo,
-            b.validade,
-            t.tipo
-          FROM badge AS b
-          LEFT JOIN tipo AS t
-            ON t.ntipo = b.ntipo
-          WHERE b.nbadge = :badgeId
-          LIMIT 1
-        `,
-        {
-          replacements: { badgeId: parsedBadgeId },
-          type: QueryTypes.SELECT,
-        },
-      ),
+    const [badgeRow, specialRequirements, requirementRows] = await Promise.all([
+      Badge.findByPk(parsedBadgeId, {
+        include: [{
+          model: Tipo,
+          as: 'tipo',
+          attributes: ['tipo'],
+        }],
+        attributes: ['nbadge', 'b_nome', 'b_descricao', 'pontos', 'imagem', 'ntipo', 'validade'],
+        transaction: undefined,
+        raw: true,
+        nest: true,
+      }),
       loadBadgeTriggers(parsedBadgeId),
       loadBadgeRequirements(parsedBadgeId),
     ]);
 
-    if (!row || row.length === 0) {
+    if (!badgeRow) {
       return null;
     }
 
-    const badgeRow = row[0];
     const levelContext = await fetchBadgeLevelContextByBadgeId(parsedBadgeId);
 
     const imageFromDb = await loadBadgeImage(parsedBadgeId);
@@ -926,7 +718,7 @@ export const adminBadgeModel = {
     return mapBadgeResponse({
       badgeRow,
       levelContext,
-      typeName: badgeRow.tipo,
+      typeName: badgeRow.tipo?.tipo || badgeRow.tipo,
       specialRequirements,
       requirements: requirementRows,
     });
@@ -967,46 +759,52 @@ export const adminBadgeModel = {
         for (const badge of expiredBadges) {
           const badgeId = badge.nbadge;
 
-          const updateResult = await sequelize.query(
-            `
-              UPDATE pedidos
-              SET estado = :rejeitadoId,
-                  descricao = COALESCE(NULLIF(descricao, ''), :defaultDescription)
-              WHERE nbadge = :badgeId
-                AND estado <> :rejeitadoId
-                AND estado <> :aprovadoId
-            `,
+          const [updatedCount] = await Pedido.update(
             {
-              replacements: {
-                badgeId,
-                rejeitadoId,
-                aprovadoId,
-                defaultDescription: 'Candidatura rejeitada automaticamente porque a badge expirou.',
+              estado: rejeitadoId,
+              descricao: sequelize.literal(`COALESCE(NULLIF(descricao, ''), 'Candidatura rejeitada automaticamente porque a badge expirou.')`),
+            },
+            {
+              where: {
+                nbadge: badgeId,
+                [Op.and]: [
+                  { estado: { [Op.ne]: rejeitadoId } },
+                  { estado: { [Op.ne]: aprovadoId } },
+                ],
               },
-              type: QueryTypes.UPDATE,
               transaction,
             },
           );
 
-          totalRejeitados += updateResult[1] || 0;
+          totalRejeitados += updatedCount || 0;
 
-          try {
+          if (updatedCount > 0) {
             await sequelize.query(
               `
-                INSERT INTO badge_expiracao_log (nbadge, data_expiracao, pedidos_rejeitados)
-                VALUES (:badgeId, :validade, :rejeitados)
-                ON CONFLICT (nbadge, data_expiracao) DO NOTHING
+                INSERT INTO pedido_historico (npedido, nestado, nutilizador, data_estado, descricao)
+                SELECT npedido, :rejeitadoId, NULL, NOW(), 'Candidatura rejeitada automaticamente porque a badge expirou.'
+                FROM pedidos
+                WHERE nbadge = :badgeId
+                  AND estado = :rejeitadoId
               `,
               {
-                replacements: {
-                  badgeId,
-                  validade: badge.validade,
-                  rejeitados: updateResult[1] || 0,
-                },
+                replacements: { rejeitadoId, badgeId },
                 type: QueryTypes.INSERT,
                 transaction,
               },
             );
+          }
+
+          try {
+            await BadgeExpiracaoLog.findOrCreate({
+              where: { nbadge: badgeId, data_expiracao: badge.validade },
+              defaults: {
+                nbadge: badgeId,
+                data_expiracao: badge.validade,
+                pedidos_rejeitados: updatedCount || 0,
+              },
+              transaction,
+            });
           } catch (logError) {
             // badge_expiracao_log table may not exist yet; ignore log errors
           }
@@ -1173,29 +971,22 @@ export const adminBadgeModel = {
 };
 
 async function deactivateLevelIfNoActiveBadges(badgeId, transaction) {
-  const nivelRow = await sequelize.query(
-    `
-      SELECT ncb.nnivel
-      FROM nivel_contem_b AS ncb
-      WHERE ncb.nbadge = :badgeId
-      LIMIT 1
-    `,
-    {
-      replacements: { badgeId },
-      type: QueryTypes.SELECT,
-      transaction,
-    },
-  );
+  const nivelAssociation = await NivelContemBadge.findOne({
+    where: { nbadge: badgeId },
+    attributes: ['nnivel'],
+    transaction,
+    raw: true,
+  });
 
-  if (!nivelRow || nivelRow.length === 0) {
+  if (!nivelAssociation) {
     return false;
   }
 
-  const nivelId = nivelRow[0].nnivel;
+  const nivelId = nivelAssociation.nnivel;
 
-  const activeBadgesInLevel = await sequelize.query(
+  const [activeResult] = await sequelize.query(
     `
-      SELECT COUNT(*) AS cnt
+      SELECT COUNT(*)::int AS cnt
       FROM nivel_contem_b AS ncb
       INNER JOIN badge AS b
         ON b.nbadge = ncb.nbadge
@@ -1209,34 +1000,23 @@ async function deactivateLevelIfNoActiveBadges(badgeId, transaction) {
     },
   );
 
-  if (activeBadgesInLevel[0]?.cnt > 0) {
+  if (activeResult?.cnt > 0) {
     return false;
   }
 
-  await sequelize.query(
-    `
-      UPDATE nivel
-      SET is_active = FALSE
-      WHERE nnivel = :nivelId
-    `,
-    {
-      replacements: { nivelId },
-      type: QueryTypes.UPDATE,
-      transaction,
-    },
+  await Nivel.update(
+    { is_active: false },
+    { where: { nnivel: nivelId }, transaction },
   );
 
   try {
-    await sequelize.query(
-      `
-        UPDATE badge_expiracao_log
-        SET nivel_desativado = TRUE
-        WHERE nbadge = :badgeId
-          AND nivel_desativado = FALSE
-      `,
+    await BadgeExpiracaoLog.update(
+      { nivel_desativado: true },
       {
-        replacements: { badgeId },
-        type: QueryTypes.UPDATE,
+        where: {
+          nbadge: badgeId,
+          nivel_desativado: false,
+        },
         transaction,
       },
     );

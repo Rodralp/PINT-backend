@@ -13,6 +13,10 @@ export const authService = {
     return authModel.recoverPassword(email);
   },
 
+  async resetPassword(email, newPassword) {
+    return authModel.resetPassword(email, newPassword);
+  },
+
   async changePassword(payload) {
     return authModel.changePassword(payload);
   },

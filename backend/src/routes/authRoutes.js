@@ -9,6 +9,7 @@ import {
 	login,
 	recoverPassword,
 	register,
+	resetPassword,
 	updateAdminUserPermissions,
 	updateAdminUserStatus,
 } from '../controllers/authController.js';
@@ -18,6 +19,7 @@ const router = Router();
 router.post('/register', register);
 router.post('/login', login);
 router.post('/recover-password', recoverPassword);
+router.post('/reset-password', resetPassword);
 router.post('/change-password', changePassword);
 router.get('/rgpd-topics', listRgpdTopics);
 router.get('/admin/service-lines', listServiceLines);

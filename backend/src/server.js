@@ -1,7 +1,6 @@
 import app from './app.js';
 import nodemailer from 'nodemailer';
-import { connectToDatabase, setupExtraTables, syncDatabase } from './config/database.js';
-import { applySchema } from './config/schema.js';
+import { connectToDatabase, syncDatabase } from './config/database.js';
 import { seedDatabase } from './config/seedData.js';
 import { emailConfig } from './config/email.js';
 
@@ -21,15 +20,9 @@ const SIDE_EFFECT_INTERVAL_MS = 60_000;
 const startServer = async () => {
   try {
     await connectToDatabase();
-    await applySchema();
-    await setupExtraTables();
+    await import('./models/sql/associations.js');
     await syncDatabase();
-    try {
-      await seedDatabase();
-      console.log('Database seeded successfully');
-    } catch (seedError) {
-      console.error('Seed failed (non-fatal):', seedError.message);
-    }
+    await seedDatabase();
 
     if (emailConfig.auth.user && emailConfig.auth.pass) {
       try {
@@ -49,15 +42,14 @@ const startServer = async () => {
     }
 
     const { requestManagementModel } = await import('./models/requestManagementModel.js');
-    setInterval(async () => {
+    setInterval(() => {
       const now = Date.now();
       if (now - lastSideEffectRun < SIDE_EFFECT_INTERVAL_MS) return;
       lastSideEffectRun = now;
-      try {
-        await requestManagementModel.runScheduledSideEffects();
-      } catch (err) {
-        console.error('Scheduled side-effects error:', err);
-      }
+      requestManagementModel.runScheduledSideEffects()
+        .catch((err) => {
+          console.error('Scheduled side-effects error:', err);
+        });
     }, SIDE_EFFECT_INTERVAL_MS);
 
     app.listen(PORT, () => {

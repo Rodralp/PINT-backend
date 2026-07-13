@@ -33,8 +33,8 @@ const defaultAccounts = [
     status: 'ativo',
   },
   {
-    nome: 'Testes',
-    email: 'testes@softinsa.pt',
+    nome: 'Ednaldo Pereira',
+    email: 'ednaldo@softinsa.pt',
     senha: '12345678',
     role: 'consultor;talent-manager;service-line-leader;admin-gestor',
     status: 'ativo',
@@ -557,6 +557,8 @@ const ensureBadgeTypes = async (transaction) => {
 };
 
 const ensureEstadosAndMockData = async (accounts, transaction) => {
+  // Estados conforme especificação:
+  // 1=rejeitado, 2=pendente-tm, 3=pendente-sll, 4=aprovado
   const estados = ['rejeitado', 'pendente-tm', 'pendente-sll', 'aprovado'];
   const estadoIds = {};
   const badgeTypeIdByIndex = await ensureBadgeTypes(transaction);
@@ -602,39 +604,18 @@ const ensureEstadosAndMockData = async (accounts, transaction) => {
 
     if (!existingCb) {
       const [insertedB] = await sequelize.query(`
-          INSERT INTO badge (b_nome, b_descricao, ntipo, pontos)
-          VALUES (:b_nome, :b_descricao, :ntipo, :pontos)
+          INSERT INTO badge (b_nome, b_descricao, ntipo, pontos, imagem)
+          VALUES (:b_nome, :b_descricao, :ntipo, :pontos, :imagem)
           RETURNING nbadge
-        `, { replacements: { b_nome, b_descricao, ntipo, pontos }, type: QueryTypes.SELECT, transaction });
+        `, { replacements: { b_nome, b_descricao, ntipo, pontos, imagem: '/badges/badge-not-found.svg' }, type: QueryTypes.SELECT, transaction });
       nbadge = Number(insertedB.nbadge);
 
-      const [existingNcb] = await sequelize.query(`SELECT 1 FROM nivel_contem_b WHERE nnivel = :nnivel AND nbadge = :nbadge LIMIT 1`,
-        { replacements: { nnivel: n.nnivel, nbadge }, type: QueryTypes.SELECT, transaction });
-      if (!existingNcb) {
-        await sequelize.query(`INSERT INTO nivel_contem_b (nnivel, nbadge) VALUES (:nnivel, :nbadge)`,
-          { replacements: { nnivel: n.nnivel, nbadge }, type: QueryTypes.INSERT, transaction });
-      }
-
-      const [existingPertenceA] = await sequelize.query(`SELECT 1 FROM b_pertence_a WHERE narea = :narea AND nbadge = :nbadge LIMIT 1`,
-        { replacements: { narea: n.narea, nbadge }, type: QueryTypes.SELECT, transaction });
-      if (!existingPertenceA) {
-        await sequelize.query(`INSERT INTO b_pertence_a (narea, nbadge) VALUES (:narea, :nbadge)`,
-          { replacements: { narea: n.narea, nbadge }, type: QueryTypes.INSERT, transaction });
-      }
-
-      const [existingPertenceSl] = await sequelize.query(`SELECT 1 FROM b_pertence_sl WHERE nsline = :nsline AND nbadge = :nbadge LIMIT 1`,
-        { replacements: { nsline: n.nsline, nbadge }, type: QueryTypes.SELECT, transaction });
-      if (!existingPertenceSl) {
-        await sequelize.query(`INSERT INTO b_pertence_sl (nsline, nbadge) VALUES (:nsline, :nbadge)`,
-          { replacements: { nsline: n.nsline, nbadge }, type: QueryTypes.INSERT, transaction });
-      }
-
-      const [existingPertenceLp] = await sequelize.query(`SELECT 1 FROM b_pertence_lp WHERE nlpath = :nlpath AND nbadge = :nbadge LIMIT 1`,
-        { replacements: { nlpath: n.nlpath, nbadge }, type: QueryTypes.SELECT, transaction });
-      if (!existingPertenceLp) {
-        await sequelize.query(`INSERT INTO b_pertence_lp (nlpath, nbadge) VALUES (:nlpath, :nbadge)`,
-          { replacements: { nlpath: n.nlpath, nbadge }, type: QueryTypes.INSERT, transaction });
-      }
+      await sequelize.query(`INSERT INTO nivel_contem_b (nnivel, nbadge) VALUES (:nnivel, :nbadge)`,
+        { replacements: { nnivel: n.nnivel, nbadge }, type: QueryTypes.INSERT, transaction });
+      
+      await sequelize.query(`INSERT INTO b_pertence_a (narea, nbadge) VALUES (:narea, :nbadge)`, { replacements: { narea: n.narea, nbadge }, type: QueryTypes.INSERT, transaction });
+      await sequelize.query(`INSERT INTO b_pertence_sl (nsline, nbadge) VALUES (:nsline, :nbadge)`, { replacements: { nsline: n.nsline, nbadge }, type: QueryTypes.INSERT, transaction });
+      await sequelize.query(`INSERT INTO b_pertence_lp (nlpath, nbadge) VALUES (:nlpath, :nbadge)`, { replacements: { nlpath: n.nlpath, nbadge }, type: QueryTypes.INSERT, transaction });
     } else {
       nbadge = Number(existingCb.nbadge);
     }
@@ -645,11 +626,12 @@ const ensureEstadosAndMockData = async (accounts, transaction) => {
         SET b_nome = :b_nome,
             b_descricao = :b_descricao,
             ntipo = :ntipo,
-            pontos = :pontos
+            pontos = :pontos,
+            imagem = :imagem
         WHERE nbadge = :nbadge
       `,
       {
-        replacements: { nbadge, b_nome, b_descricao, ntipo, pontos },
+        replacements: { nbadge, b_nome, b_descricao, ntipo, pontos, imagem: '/badges/badge-not-found.svg' },
         type: QueryTypes.UPDATE,
         transaction,
       },
@@ -657,14 +639,6 @@ const ensureEstadosAndMockData = async (accounts, transaction) => {
 
     badgesByNivel[n.nnivel] = nbadge;
   }
-
-  await sequelize.query(`
-    SELECT setval(
-      pg_get_serial_sequence('badge', 'nbadge'),
-      COALESCE((SELECT MAX(nbadge) FROM badge), 1),
-      true
-    )
-  `, { type: QueryTypes.SELECT, transaction });
 
   for (const [typeId, points] of badgePointsByTypeId.entries()) {
     await sequelize.query(
@@ -735,6 +709,7 @@ const ensureEstadosAndMockData = async (accounts, transaction) => {
         continue;
       }
 
+      // seed 1 = criar pedido APROVADO (estado 4) com badge obtida
       if (seed === 1) {
         const [createdPedido] = await sequelize.query(
           `
@@ -763,6 +738,7 @@ const ensureEstadosAndMockData = async (accounts, transaction) => {
         continue;
       }
 
+      // seed 2 = pendente-tm (estado 2), seed 3 = rejeitado (estado 1), seed 6 = pendente-sll (estado 3)
       const estadoId = seed === 2
         ? estadoIds['pendente-tm']
         : seed === 3
@@ -783,6 +759,36 @@ const ensureEstadosAndMockData = async (accounts, transaction) => {
         },
       );
     }
+  }
+};
+
+const seedServiceLineData = async () => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    const accounts = await Account.findAll({
+      attributes: ['id', 'nome', 'email', 'role'],
+      order: [['id', 'ASC']],
+      transaction,
+    });
+
+    if (accounts.length === 0) {
+      await transaction.commit();
+      return;
+    }
+
+    const utilizadorByAccountId = await ensureUtilizadorForAccounts(accounts, transaction);
+    const learningPathId = await getOrCreateLearningPathId(transaction);
+    const serviceLineIds = await ensureServiceLinesAndAreas(learningPathId, transaction);
+    await assignServiceLineToEachLeader(accounts, serviceLineIds, transaction);
+    
+    await ensureEstadosAndMockData(accounts, transaction);
+    await seedBadgeRequirements(transaction);
+
+    await transaction.commit();
+  } catch (error) {
+    await transaction.rollback();
+    throw error;
   }
 };
 
@@ -856,43 +862,14 @@ const seedBadgeRequirements = async (transaction) => {
   }
 };
 
-const seedServiceLineData = async () => {
-  const transaction = await sequelize.transaction();
-
-  try {
-    const accounts = await Account.findAll({
-      attributes: ['id', 'nome', 'email', 'role'],
-      order: [['id', 'ASC']],
-      transaction,
-    });
-
-    if (accounts.length === 0) {
-      await transaction.commit();
-      return;
-    }
-
-    const utilizadorByAccountId = await ensureUtilizadorForAccounts(accounts, transaction);
-    const learningPathId = await getOrCreateLearningPathId(transaction);
-    const serviceLineIds = await ensureServiceLinesAndAreas(learningPathId, transaction);
-    await assignServiceLineToEachLeader(accounts, serviceLineIds, transaction);
-    
-    await ensureEstadosAndMockData(accounts, transaction);
-    await seedBadgeRequirements(transaction);
-
-    await transaction.commit();
-  } catch (error) {
-    await transaction.rollback();
-    throw error;
-  }
-};
-
 export const seedDatabase = async () => {
-  const [accountsCount, remindersCount] = await Promise.all([Account.count(), Reminder.count()]);
+  const [accountsCount] = await Promise.all([Account.count()]);
+  if (accountsCount > 0) return;
+
+  const remindersCount = await Reminder.count();
 
   if (accountsCount === 0) {
-    for (const accountData of defaultAccounts) {
-      await Account.create(accountData);
-    }
+    await Account.bulkCreate(defaultAccounts);
   }
 
   const orderedAccounts = await Account.findAll({ order: [['id', 'ASC']] });

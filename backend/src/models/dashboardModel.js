@@ -1,60 +1,17 @@
-import { QueryTypes } from 'sequelize';
+import { QueryTypes, Op } from 'sequelize';
 import { consultorModel } from './consultorModel.js';
 import { adminBadgeModel } from './adminBadgeModel.js';
 import { sequelize } from '../config/database.js';
+import { Account } from './sql/Account.js';
+import { SllLeaderSl } from './sql/SllLeaderSl.js';
+import { BadgePertenceSL } from './sql/BadgePertenceSL.js';
+import { CObtemBadge } from './sql/CObtemBadge.js';
+import { Pedido } from './sql/Pedido.js';
 
 const { loadBadgeImagesBatch } = adminBadgeModel;
 const { resolveBadgeImage, resolveBadgeTemplate, isSpecialTypeName } = consultorModel;
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
-
-const countConsultorsByServiceLineScope = async (scope, countAllUsers = false) => {
-  if (!scope.hasServiceLineScope) {
-    if (countAllUsers) {
-      const [rows] = await sequelize.query(
-        `SELECT COUNT(*)::int AS total FROM utilizador AS u WHERE LOWER(COALESCE(u.status, '')) = 'ativo'`,
-        { type: QueryTypes.SELECT },
-      );
-      return Number(rows?.total) || 0;
-    }
-    const [rows] = await sequelize.query(
-      `SELECT COUNT(*)::int AS total FROM utilizador AS u WHERE LOWER(COALESCE(u.status, '')) = 'ativo' AND LOWER(COALESCE(u.permissoes, '')) LIKE '%consultor%'`,
-      { type: QueryTypes.SELECT },
-    );
-    return Number(rows?.total) || 0;
-  }
-
-  const badgeRows = await sequelize.query(
-    `SELECT bps.nbadge FROM b_pertence_sl AS bps WHERE bps.nsline IN (:serviceLineIds)`,
-    { replacements: { serviceLineIds: scope.serviceLineIds }, type: QueryTypes.SELECT },
-  );
-  const badgeIds = badgeRows.map((b) => b.nbadge).filter(Boolean);
-  if (badgeIds.length === 0) return 0;
-
-  const [obtainedRows, requestedRows] = await Promise.all([
-    sequelize.query(
-      `SELECT DISTINCT cb.nutilizador FROM c_obtem_b AS cb WHERE cb.nbadge IN (:badgeIds)`,
-      { replacements: { badgeIds }, type: QueryTypes.SELECT },
-    ),
-    sequelize.query(
-      `SELECT DISTINCT p.nutilizador FROM pedidos AS p WHERE p.nbadge IN (:badgeIds)`,
-      { replacements: { badgeIds }, type: QueryTypes.SELECT },
-    ),
-  ]);
-
-  const consultorIds = [...new Set([
-    ...obtainedRows.map((c) => c.nutilizador),
-    ...requestedRows.map((c) => c.nutilizador),
-  ])].filter((id) => id > 0);
-
-  if (consultorIds.length === 0) return 0;
-
-  const [rows] = await sequelize.query(
-    `SELECT COUNT(*)::int AS total FROM utilizador AS u WHERE u.nutilizador IN (:consultorIds) AND LOWER(COALESCE(u.status, '')) = 'ativo' AND LOWER(COALESCE(u.permissoes, '')) LIKE '%consultor%'`,
-    { replacements: { consultorIds }, type: QueryTypes.SELECT },
-  );
-  return Number(rows?.total) || 0;
-};
 
 // Ensure data_registo column exists in utilizador table
 const ensureDataRegistoColumn = async () => {
@@ -205,14 +162,8 @@ const normalizeServiceLineIds = (rows) => {
 };
 
 const getUtilizadorIdByAccountId = async (accountId) => {
-  const [row] = await sequelize.query(
-    `SELECT nutilizador FROM utilizador WHERE nutilizador = :accountId LIMIT 1`,
-    {
-      replacements: { accountId: Number(accountId) },
-      type: QueryTypes.SELECT,
-    }
-  );
-  return row ? Number(row.nutilizador) : null;
+  const account = await Account.findByPk(Number(accountId), { attributes: ['id'] });
+  return account?.id ? Number(account.id) : null;
 };
 
 const getServiceLineScopeForRole = async (role, accountId) => {
@@ -230,22 +181,16 @@ const getServiceLineScopeForRole = async (role, accountId) => {
     return { hasServiceLineScope: true, serviceLineIds: [-1] };
   }
 
-  const rows = await sequelize.query(
-    `
-      SELECT nsline
-      FROM sll_leader_sl
-      WHERE nutilizador = :utilizadorId
-      ORDER BY nsline ASC
-    `,
-    {
-      replacements: { utilizadorId },
-      type: QueryTypes.SELECT,
-    },
-  );
+  const slRows = await SllLeaderSl.findAll({
+    where: { nutilizador: utilizadorId },
+    attributes: ['nsline'],
+    order: [['nsline', 'ASC']],
+    raw: true,
+  });
 
   return {
     hasServiceLineScope: true,
-    serviceLineIds: normalizeServiceLineIds(rows),
+    serviceLineIds: normalizeServiceLineIds(slRows),
   };
 };
 
@@ -260,6 +205,58 @@ const buildScopedBadgeCondition = (badgeColumn) => `
     )
   )
 `;
+
+const countConsultorsByServiceLineScope = async (scope, countAllUsers = false) => {
+  if (!scope.hasServiceLineScope) {
+    const where = { status: 'ativo' };
+    if (!countAllUsers) {
+      where[Op.and] = sequelize.where(
+        sequelize.fn('LOWER', sequelize.col('permissoes')),
+        { [Op.like]: '%consultor%' },
+      );
+    }
+    return Account.count({ where });
+  }
+
+  const slBadges = await BadgePertenceSL.findAll({
+    where: { nsline: { [Op.in]: scope.serviceLineIds } },
+    attributes: ['nbadge'],
+    raw: true,
+  });
+  const badgeIds = slBadges.map((b) => b.nbadge).filter(Boolean);
+  if (badgeIds.length === 0) return 0;
+
+  const [obtained, requested] = await Promise.all([
+    CObtemBadge.findAll({
+      where: { nbadge: { [Op.in]: badgeIds } },
+      attributes: ['nutilizador'],
+      raw: true,
+    }),
+    Pedido.findAll({
+      where: { nbadge: { [Op.in]: badgeIds } },
+      attributes: ['nutilizador'],
+      raw: true,
+    }),
+  ]);
+
+  const consultorIds = [...new Set([
+    ...obtained.map((c) => c.nutilizador),
+    ...requested.map((c) => c.nutilizador),
+  ])].filter((id) => id > 0);
+
+  if (consultorIds.length === 0) return 0;
+
+  return Account.count({
+    where: {
+      id: { [Op.in]: consultorIds },
+      status: 'ativo',
+      [Op.and]: sequelize.where(
+        sequelize.fn('LOWER', sequelize.col('permissoes')),
+        { [Op.like]: '%consultor%' },
+      ),
+    },
+  });
+};
 
 const getPendingStatesByRole = (role) => {
   if (role === 'service-line-leader') {
@@ -500,10 +497,6 @@ const getManagerDashboardDataFromDb = async (role, accountId) => {
       },
     ),
   ]);
-
-
-
-
 
 
 

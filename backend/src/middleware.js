@@ -1,26 +1,30 @@
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET;
-
 export const checkToken = (req, res, next) => {
-  if (!JWT_SECRET) {
-    return res.status(500).json({ message: 'JWT_SECRET not configured.' });
+  let token = req.headers['x-access-token'] || req.headers['authorization'];
+
+  if (token && token.startsWith('Bearer ')) {
+    token = token.slice(7, token.length);
   }
 
-  const authHeader = req.headers['x-access-token'] || req.headers.authorization;
-  if (!authHeader) {
-    return res.status(401).json({ message: 'Token invalido ou ausente.' });
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      message: 'Token indisponivel.',
+    });
   }
 
-  const token = authHeader.startsWith('Bearer ')
-    ? authHeader.slice(7)
-    : authHeader;
+  const jwtSecret = process.env.JWT_SECRET;
 
-  try {
-    const payload = jwt.verify(token, JWT_SECRET);
-    req.userId = payload.id;
+  jwt.verify(token, jwtSecret, (err, decoded) => {
+    if (err) {
+      return res.status(401).json({
+        success: false,
+        message: 'O token nao e valido.',
+      });
+    }
+
+    req.decoded = decoded;
     next();
-  } catch {
-    return res.status(401).json({ message: 'Token invalido ou ausente.' });
-  }
+  });
 };

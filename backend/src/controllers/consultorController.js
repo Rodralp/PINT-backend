@@ -283,6 +283,7 @@ export const getProfileData = async (req, res) => {
     const data = await consultorService.getProfileData(accountId);
     res.status(200).json(data);
   } catch (error) {
+    console.error('getProfileData error:', error);
     res.status(500).json({ message: 'Failed to fetch profile data.', error: error.message });
   }
 };
