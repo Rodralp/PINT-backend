@@ -2275,7 +2275,7 @@ const requestBadgeAcquisition = async (accountId, badgeId) => {
     },
   );
 
-  if (hasObtado) {
+  if (hasObtained) {
     const error = new Error('Badge already obtained.');
     error.statusCode = 409;
     throw error;
@@ -2496,7 +2496,19 @@ export const consultorModel = {
   savePreferences,
   getUserVitrine,
   saveUserVitrine,
-  getBadgeSuggestions,
+  async getBadgeSuggestions(accountId, limit) {
+    const data = await buildBadgeSuggestions(accountId, limit);
+    const badgeIds = data.map((s) => s.badgeDbId).filter((id) => id > 0);
+    if (badgeIds.length > 0) {
+      const imageMap = await loadBadgeImagesBatch(badgeIds).catch(() => ({}));
+      for (const item of data) {
+        if (imageMap[item.badgeDbId]) {
+          item.badgeImage = imageMap[item.badgeDbId];
+        }
+      }
+    }
+    return clone(data);
+  },
   getLearningPaths: buildLearningPaths,
   getMyBadges: buildMyBadges,
   getMyRequests: buildMyRequests,
