@@ -8,7 +8,6 @@ import { Estado } from './sql/Estado.js';
 import { Requisito } from './sql/Requisito.js';
 import { BadgeTrigger } from './sql/BadgeTrigger.js';
 import { BadgeImagem } from './sql/BadgeImagem.js';
-import { PedidoHistorico } from './sql/PedidoHistorico.js';
 import { NivelContemBadge } from './sql/NivelContemBadge.js';
 import { BadgePertenceArea } from './sql/BadgePertenceArea.js';
 import { BadgePertenceSL } from './sql/BadgePertenceSL.js';
@@ -777,23 +776,6 @@ export const adminBadgeModel = {
           );
 
           totalRejeitados += updatedCount || 0;
-
-          if (updatedCount > 0) {
-            await sequelize.query(
-              `
-                INSERT INTO pedido_historico (npedido, nestado, nutilizador, data_estado, descricao)
-                SELECT npedido, :rejeitadoId, NULL, NOW(), 'Candidatura rejeitada automaticamente porque a badge expirou.'
-                FROM pedidos
-                WHERE nbadge = :badgeId
-                  AND estado = :rejeitadoId
-              `,
-              {
-                replacements: { rejeitadoId, badgeId },
-                type: QueryTypes.INSERT,
-                transaction,
-              },
-            );
-          }
 
           try {
             await BadgeExpiracaoLog.findOrCreate({

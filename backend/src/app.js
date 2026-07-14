@@ -14,7 +14,6 @@ import serviceLineLeaderRoutes from './routes/serviceLineLeaderRoutes.js';
 import talentManagerRoutes from './routes/talentManagerRoutes.js';
 import teamRoutes from './routes/teamRoutes.js';
 import shareRoutes from './routes/shareRoutes.js';
-import reportRoutes from './routes/reportRoutes.js';
 
 const app = express();
 
@@ -38,6 +37,5 @@ app.use('/api/talent-manager', talentManagerRoutes);
 app.use('/api/request-management', requestManagementRoutes);
 app.use('/api/teams', teamRoutes);
 app.use('/api/share', shareRoutes);
-app.use('/api/reports', checkToken, reportRoutes);
 
 export default app;

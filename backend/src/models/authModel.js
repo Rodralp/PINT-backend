@@ -236,27 +236,7 @@ export const authModel = {
 
   async recoverPassword(email) {
     const account = await this.findByEmail(email);
-    if (!account) return null;
-    return { id: account.id, email: account.email };
-  },
-
-  async resetPassword(email, newPassword) {
-    const account = await this.findByEmail(email);
-    if (!account) return null;
-
-    const salt = await bcrypt.genSalt(10);
-    account.senha = await bcrypt.hash(newPassword, salt);
-    await account.save();
-
-    const hasPreferences = await getHasPreferences(account.id);
-    const accountData = sanitizeAccount(account, hasPreferences);
-    const roles = normalizeRoleList(account.permissoes);
-    const isAdminGestor = roles.includes('admin-gestor');
-    const token = isAdminGestor
-      ? jwt.sign({ id: account.id, email: account.email }, process.env.JWT_SECRET)
-      : jwt.sign({ id: account.id, email: account.email }, process.env.JWT_SECRET, { expiresIn: '1h' });
-
-    return { ...accountData, token };
+    return account ? account.senha : null;
   },
 
   async changePassword({ accountId, currentPassword, newPassword }) {
@@ -332,19 +312,24 @@ export const authModel = {
       type: QueryTypes.SELECT,
     });
 
+    // Filter results in JavaScript to avoid complex SQL WHERE conditions
     const mappedUsers = rows.filter((row) => {
+      // Filter by tab (pending or active/inactive)
       const status = row.status?.toLowerCase() || '';
       if (isTabPending) {
         if (status !== 'pendente') return false;
       } else {
+        // Show both ativo and inativo users, but not pendente
         if (status === 'pendente') return false;
       }
 
+      // Filter by search term
       if (normalizedSearch) {
         const searchable = `${row.nome || ''} ${row.email || ''}`.toLowerCase();
         if (!searchable.includes(normalizedSearch)) return false;
       }
 
+      // Filter by account type
       if (normalizedAccountType !== 'all') {
         const userRoles = `${row.permissoes || ''}`.toLowerCase();
         if (!userRoles.includes(normalizedAccountType)) return false;
@@ -353,6 +338,7 @@ export const authModel = {
       return true;
     }).map(mapUserRow);
 
+    // Batch-load avatars
     const userIds = mappedUsers.map((u) => u.id).filter(Boolean);
     let avatarMap = {};
     if (userIds.length > 0) {
@@ -385,12 +371,14 @@ export const authModel = {
       throw error;
     }
 
+    // Validação: SLL só pode ser de uma service line
     if (normalizedRoles.includes('service-line-leader') && normalizedServiceLineIds.length > 1) {
       const error = new Error('Service Line Leader só pode ser associado a uma Service Line.');
       error.statusCode = 400;
       throw error;
     }
 
+    // Validação: uma service line só pode ter um SLL
     if (normalizedRoles.includes('service-line-leader') && normalizedServiceLineIds.length === 1) {
       const existingSll = await SllLeaderSl.findOne({
         where: { nsline: normalizedServiceLineIds[0] },
@@ -478,12 +466,14 @@ export const authModel = {
       throw error;
     }
 
+    // Validação: SLL só pode ser de uma service line
     if (normalizedRoles.includes('service-line-leader') && normalizedServiceLineIds.length > 1) {
       const error = new Error('Service Line Leader só pode ser associado a uma Service Line.');
       error.statusCode = 400;
       throw error;
     }
 
+    // Validação: uma service line só pode ter um SLL
     if (normalizedRoles.includes('service-line-leader') && normalizedServiceLineIds.length === 1) {
       const existingSll = await SllLeaderSl.findOne({
         where: {
@@ -503,6 +493,8 @@ export const authModel = {
     const transaction = await sequelize.transaction();
 
     try {
+      // Usar ponto e vírgula como separador (consistente com o resto da aplicação)
+      // O campo Sequelize 'role' é mapeado para a coluna 'permissoes' no banco
       account.role = normalizedRoles.join(';');
       await account.save({ transaction });
 
@@ -590,27 +582,28 @@ export const authModel = {
     }
 
     if (normalizedDecision === 'approve') {
+      // Approve: set status to 'ativo'
+      // Fetch user info before approval for email
       const userAccount = await Account.findByPk(Number(accountId), { attributes: ['nome', 'email'] });
 
       const result = this.updateAdminUserStatus(accountId, { status: 'ativo' });
 
+      // Send approval email
       if (userAccount?.email) {
-        const emailEnabled = await communicationModel.isEmailEnabledForEvent('Novo registo');
-        if (emailEnabled) {
-          try {
-            await sendEmail({
-              to: userAccount.email,
-              subject: 'Conta Aprovada - PINT',
-              html: emailTemplates.registrationApproved({ userName: userAccount.nome || 'Utilizador' }),
-            });
-          } catch (emailError) {
-            console.error('Failed to send registration approval email.', emailError);
-          }
+        try {
+          await sendEmail({
+            to: userAccount.email,
+            subject: 'Conta Aprovada - PINT',
+            html: emailTemplates.registrationApproved({ userName: userAccount.nome || 'Utilizador' }),
+          });
+        } catch (emailError) {
+          console.error('Failed to send registration approval email.', emailError);
         }
       }
 
       return result;
     } else {
+      // Reject: delete the user from database
       const deleted = await Account.destroy({
         where: { nutilizador: Number(accountId) },
       });

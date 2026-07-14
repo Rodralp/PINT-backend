@@ -12,4 +12,8 @@ export const adminGeneralManagementService = {
   updateRgpdTopics(rows) {
     return adminGeneralManagementModel.updateRgpdTopics(rows);
   },
+
+  updateGeneralSettings(rows) {
+    return adminGeneralManagementModel.updateGeneralSettings(rows);
+  },
 };

@@ -27,6 +27,7 @@ import { Notificacao } from './Notificacao.js';
 import { Preferencia } from './Preferencia.js';
 import { ConfigNotificacao } from './ConfigNotificacao.js';
 import { RgpdTopico } from './RgpdTopico.js';
+import { ConfigGeral } from './ConfigGeral.js';
 import { ConfigNotificacaoUtilizador } from './ConfigNotificacaoUtilizador.js';
 import { AGereN } from './AGereN.js';
 import { AGereArea } from './AGereArea.js';
@@ -39,7 +40,6 @@ import { Vitrine } from './Vitrine.js';
 import { BadgeExpiracaoLog } from './BadgeExpiracaoLog.js';
 import { BadgeImagem } from './BadgeImagem.js';
 import { UtilizadorImagem } from './UtilizadorImagem.js';
-import { PedidoHistorico } from './PedidoHistorico.js';
 
 // ============================================================
 // Core domain: LearningPath -> ServiceLine -> Area -> Nivel
@@ -117,19 +117,6 @@ Pedido.hasMany(Motivo, { foreignKey: 'npedido', as: 'motivos' });
 
 Motivo.belongsTo(Account, { foreignKey: 'nutilizador', as: 'utilizador' });
 Account.hasMany(Motivo, { foreignKey: 'nutilizador', as: 'motivos' });
-
-// ============================================================
-// Pedido history (audit trail)
-// ============================================================
-
-PedidoHistorico.belongsTo(Pedido, { foreignKey: 'npedido', as: 'pedido' });
-Pedido.hasMany(PedidoHistorico, { foreignKey: 'npedido', as: 'historico' });
-
-PedidoHistorico.belongsTo(Estado, { foreignKey: 'nestado', as: 'estadoInfo' });
-Estado.hasMany(PedidoHistorico, { foreignKey: 'nestado', as: 'historico' });
-
-PedidoHistorico.belongsTo(Account, { foreignKey: 'nutilizador', as: 'utilizador' });
-Account.hasMany(PedidoHistorico, { foreignKey: 'nutilizador', as: 'pedidoHistorico' });
 
 // ============================================================
 // Pedido management junction tables

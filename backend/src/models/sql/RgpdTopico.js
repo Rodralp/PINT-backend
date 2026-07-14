@@ -26,3 +26,4 @@ export const RgpdTopico = sequelize.define('RgpdTopico', {
   timestamps: false,
   underscored: false
 });
+
