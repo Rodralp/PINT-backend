@@ -2,7 +2,6 @@ import { Op } from 'sequelize';
 import { sequelize } from '../config/database.js';
 import { ConfigNotificacao } from './sql/ConfigNotificacao.js';
 import { RgpdTopico } from './sql/RgpdTopico.js';
-import { ConfigGeral } from './sql/ConfigGeral.js';
 
 const defaultNotificationRows = [
   {
@@ -11,7 +10,7 @@ const defaultNotificationRows = [
     sll: true,
     tl: false,
     consultor: false,
-    email: false,
+    email: true,
     webApp: true,
   },
   {
@@ -65,7 +64,7 @@ const defaultNotificationRows = [
     sll: false,
     tl: false,
     consultor: true,
-    email: true,
+    email: false,
     webApp: true,
   },
   {
@@ -78,6 +77,12 @@ const defaultNotificationRows = [
     webApp: true,
   },
 ];
+
+const EMAIL_SUPPORTED_EVENTS = new Set([
+  'novo registo',
+  'pedido aprovado',
+  'pedido rejeitado',
+]);
 
 const defaultRgpdTopics = [
   {
@@ -107,34 +112,6 @@ const defaultRgpdTopics = [
   },
 ];
 
-const defaultGeneralSettings = [
-  {
-    key: 'Tema padrao',
-    value: 'Claro',
-    options: ['Claro', 'Escuro', 'Automatico'],
-  },
-  {
-    key: 'Idioma padrao',
-    value: 'Portugues (PT)',
-    options: ['Portugues (PT)', 'English (EN)', 'Espanol (ES)'],
-  },
-  {
-    key: 'Notificacoes email',
-    value: 'Ativo',
-    options: ['Ativo', 'Inativo'],
-  },
-  {
-    key: 'Notificacoes in-app',
-    value: 'Ativo',
-    options: ['Ativo', 'Inativo'],
-  },
-  {
-    key: 'Resumo semanal',
-    value: 'Inativo',
-    options: ['Ativo', 'Inativo'],
-  },
-];
-
 const parseId = (value) => {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
@@ -161,18 +138,6 @@ const normalizeText = (value) => String(value ?? '').trim();
 const normalizeEventKey = (value) => normalizeText(value).toLowerCase();
 
 const normalizeBody = (value) => String(value ?? '').replace(/\r\n/g, '\n');
-
-const normalizeOptions = (value) => {
-  if (!value) {
-    return [];
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item || '').trim()).filter(Boolean);
-  }
-
-  return [];
-};
 
 const ensureNotificationDefaults = async (transaction) => {
   const rows = await ConfigNotificacao.findAll({
@@ -262,24 +227,9 @@ const ensureRgpdDefaults = async (transaction) => {
   }
 };
 
-const ensureGeneralDefaults = async (transaction) => {
-  for (const item of defaultGeneralSettings) {
-    await ConfigGeral.findOrCreate({
-      where: { chave: item.key },
-      defaults: {
-        chave: item.key,
-        valor: item.value,
-        opcoes: item.options,
-      },
-      transaction,
-    });
-  }
-};
-
 const ensureDefaults = async (transaction) => {
   await ensureNotificationDefaults(transaction);
   await ensureRgpdDefaults(transaction);
-  await ensureGeneralDefaults(transaction);
 };
 
 const listNotificationSettings = async (transaction) => {
@@ -296,6 +246,7 @@ const listNotificationSettings = async (transaction) => {
     tl: Boolean(row?.tl),
     consultor: Boolean(row?.consultor),
     email: Boolean(row?.email),
+    hasEmail: EMAIL_SUPPORTED_EVENTS.has(normalizeEventKey(row?.evento)),
     webApp: Boolean(row?.web_app),
   }));
 };
@@ -311,20 +262,6 @@ const listRgpdTopics = async (transaction) => {
     title: row?.titulo || '',
     body: row?.corpo || '',
     order: Number(row?.ordem) || 0,
-  }));
-};
-
-const listGeneralSettings = async (transaction) => {
-  const rows = await ConfigGeral.findAll({
-    order: [['nconfig', 'ASC']],
-    transaction,
-  });
-
-  return (rows || []).map((row) => ({
-    id: Number(row?.nconfig),
-    key: row?.chave || '',
-    value: row?.valor || '',
-    options: normalizeOptions(row?.opcoes),
   }));
 };
 
@@ -357,18 +294,6 @@ const normalizeRgpdUpdate = (row) => {
   };
 };
 
-const normalizeGeneralUpdate = (row) => {
-  const id = parseId(row?.id);
-  if (!id) {
-    return null;
-  }
-
-  return {
-    id,
-    value: normalizeText(row?.value),
-  };
-};
-
 export const adminGeneralManagementModel = {
   async listGeneralManagement() {
     return sequelize.transaction(async (transaction) => {
@@ -376,9 +301,8 @@ export const adminGeneralManagementModel = {
 
       const notifications = await listNotificationSettings(transaction);
       const rgpd = await listRgpdTopics(transaction);
-      const settings = await listGeneralSettings(transaction);
 
-      return { notifications, rgpd, settings };
+      return { notifications, rgpd };
     });
   },
 
@@ -430,28 +354,6 @@ export const adminGeneralManagementModel = {
       }
 
       return listRgpdTopics(transaction);
-    });
-  },
-
-  async updateGeneralSettings(rows) {
-    const updates = (Array.isArray(rows) ? rows : [])
-      .map(normalizeGeneralUpdate)
-      .filter(Boolean);
-
-    return sequelize.transaction(async (transaction) => {
-      await ensureDefaults(transaction);
-
-      for (const update of updates) {
-        await ConfigGeral.update(
-          { valor: update.value },
-          {
-            where: { nconfig: update.id },
-            transaction,
-          },
-        );
-      }
-
-      return listGeneralSettings(transaction);
     });
   },
 };

@@ -236,7 +236,27 @@ export const authModel = {
 
   async recoverPassword(email) {
     const account = await this.findByEmail(email);
-    return account ? account.senha : null;
+    if (!account) return null;
+    return { id: account.id, email: account.email };
+  },
+
+  async resetPassword(email, newPassword) {
+    const account = await this.findByEmail(email);
+    if (!account) return null;
+
+    const salt = await bcrypt.genSalt(10);
+    account.senha = await bcrypt.hash(newPassword, salt);
+    await account.save();
+
+    const hasPreferences = await getHasPreferences(account.id);
+    const accountData = sanitizeAccount(account, hasPreferences);
+    const roles = normalizeRoleList(account.permissoes);
+    const isAdminGestor = roles.includes('admin-gestor');
+    const token = isAdminGestor
+      ? jwt.sign({ id: account.id, email: account.email }, process.env.JWT_SECRET)
+      : jwt.sign({ id: account.id, email: account.email }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+    return { ...accountData, token };
   },
 
   async changePassword({ accountId, currentPassword, newPassword }) {
@@ -590,14 +610,17 @@ export const authModel = {
 
       // Send approval email
       if (userAccount?.email) {
-        try {
-          await sendEmail({
-            to: userAccount.email,
-            subject: 'Conta Aprovada - PINT',
-            html: emailTemplates.registrationApproved({ userName: userAccount.nome || 'Utilizador' }),
-          });
-        } catch (emailError) {
-          console.error('Failed to send registration approval email.', emailError);
+        const emailEnabled = await communicationModel.isEmailEnabledForEvent('Novo registo');
+        if (emailEnabled) {
+          try {
+            await sendEmail({
+              to: userAccount.email,
+              subject: 'Conta Aprovada - PINT',
+              html: emailTemplates.registrationApproved({ userName: userAccount.nome || 'Utilizador' }),
+            });
+          } catch (emailError) {
+            console.error('Failed to send registration approval email.', emailError);
+          }
         }
       }
 

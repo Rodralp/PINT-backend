@@ -604,10 +604,10 @@ const ensureEstadosAndMockData = async (accounts, transaction) => {
 
     if (!existingCb) {
       const [insertedB] = await sequelize.query(`
-          INSERT INTO badge (b_nome, b_descricao, ntipo, pontos)
-          VALUES (:b_nome, :b_descricao, :ntipo, :pontos)
+          INSERT INTO badge (b_nome, b_descricao, ntipo, pontos, imagem)
+          VALUES (:b_nome, :b_descricao, :ntipo, :pontos, :imagem)
           RETURNING nbadge
-        `, { replacements: { b_nome, b_descricao, ntipo, pontos }, type: QueryTypes.SELECT, transaction });
+        `, { replacements: { b_nome, b_descricao, ntipo, pontos, imagem: '/badges/badge-not-found.svg' }, type: QueryTypes.SELECT, transaction });
       nbadge = Number(insertedB.nbadge);
 
       await sequelize.query(`INSERT INTO nivel_contem_b (nnivel, nbadge) VALUES (:nnivel, :nbadge)`,
@@ -626,11 +626,12 @@ const ensureEstadosAndMockData = async (accounts, transaction) => {
         SET b_nome = :b_nome,
             b_descricao = :b_descricao,
             ntipo = :ntipo,
-            pontos = :pontos
+            pontos = :pontos,
+            imagem = :imagem
         WHERE nbadge = :nbadge
       `,
       {
-        replacements: { nbadge, b_nome, b_descricao, ntipo, pontos },
+        replacements: { nbadge, b_nome, b_descricao, ntipo, pontos, imagem: '/badges/badge-not-found.svg' },
         type: QueryTypes.UPDATE,
         transaction,
       },
@@ -862,7 +863,10 @@ const seedBadgeRequirements = async (transaction) => {
 };
 
 export const seedDatabase = async () => {
-  const [accountsCount, remindersCount] = await Promise.all([Account.count(), Reminder.count()]);
+  const [accountsCount] = await Promise.all([Account.count()]);
+  if (accountsCount > 0) return;
+
+  const remindersCount = await Reminder.count();
 
   if (accountsCount === 0) {
     await Account.bulkCreate(defaultAccounts);

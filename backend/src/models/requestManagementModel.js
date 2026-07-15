@@ -13,6 +13,7 @@ import { Badge } from './sql/Badge.js';
 import { TmGereP } from './sql/TmGereP.js';
 import { SllGereP } from './sql/SllGereP.js';
 import { AdmGereP } from './sql/AdmGereP.js';
+import { PedidoHistorico } from './sql/PedidoHistorico.js';
 import { syncSpecialBadgesForConsultor } from './consultorModel.js';
 import { communicationModel } from './communicationModel.js';
 import { sendEmail } from '../services/emailService.js';
@@ -77,6 +78,24 @@ const autoRejectExpiredRequests = async () => {
         defaultDescription: AUTO_REJECTION_NOTE,
       },
       type: QueryTypes.UPDATE,
+    },
+  );
+
+  await sequelize.query(
+    `
+      INSERT INTO pedido_historico (npedido, nestado, nutilizador, data_estado, descricao)
+      SELECT npedido, :rejectedId, NULL, NOW(), :defaultDescription
+      FROM pedidos
+      WHERE data_limite IS NOT NULL
+        AND data_limite <= CURRENT_DATE
+        AND estado = :rejectedId
+    `,
+    {
+      replacements: {
+        rejectedId: rejectedEstadoId,
+        defaultDescription: AUTO_REJECTION_NOTE,
+      },
+      type: QueryTypes.INSERT,
     },
   );
 };
@@ -540,6 +559,7 @@ const fetchRequestRows = async ({ role, actorUtilizadorId, requestId = null }) =
         e.estado AS estado_nome,
         u.nome AS consultor_nome,
         b.b_nome AS badge_nome,
+        b.b_descricao AS badge_descricao,
         b.validade AS badge_validade,
         COALESCE(NULLIF(b.pontos, 0), 0) AS badge_pontos,
         n.nivel AS nivel_nome,
@@ -589,6 +609,7 @@ const fetchRequestRows = async ({ role, actorUtilizadorId, requestId = null }) =
         e.estado AS estado_nome,
         u.nome AS consultor_nome,
         b.b_nome AS badge_nome,
+        b.b_descricao AS badge_descricao,
         b.validade AS badge_validade,
         COALESCE(NULLIF(b.pontos, 0), 0) AS badge_pontos,
         n.nivel AS nivel_nome,
@@ -639,6 +660,7 @@ const mapRequestListItem = (row, role) => {
     id: Number(row.npedido),
     consultant: row.consultor_nome,
     badge: row.area_nome || row.badge_nome || 'Badge',
+    badgeDescription: row.badge_descricao || '',
     level: levelTitle,
     levelLabel: `Nível ${levelTitle}`,
     area: row.learning_path_nome || 'Jornada Técnica',
@@ -922,6 +944,14 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
       { where: { npedido: Number(request.npedido) }, transaction },
     );
 
+    await PedidoHistorico.create({
+      npedido: Number(request.npedido),
+      nestado: targetEstadoId,
+      nutilizador: actorUtilizadorId || null,
+      data_estado: new Date(),
+      descricao: finalDescription,
+    }, { transaction });
+
     await upsertRequestMotivo({
       requestId: request.npedido,
       actorUtilizadorId,
@@ -1042,26 +1072,32 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
 
       if (consultorAccount?.email) {
         if (shouldNotifyApproval) {
-          await sendEmail({
-            to: consultorAccount.email,
-            subject: 'Pedido Aprovado - PINT',
-            html: emailTemplates.requestApproved({
-              userName: consultorAccount.nome || 'Consultor',
-              badgeName,
-            }),
-          });
+          const emailEnabled = await communicationModel.isEmailEnabledForEvent('Pedido aprovado');
+          if (emailEnabled) {
+            await sendEmail({
+              to: consultorAccount.email,
+              subject: 'Pedido Aprovado - PINT',
+              html: emailTemplates.requestApproved({
+                userName: consultorAccount.nome || 'Consultor',
+                badgeName,
+              }),
+            });
+          }
         }
 
         if (shouldNotifyRejection) {
-          await sendEmail({
-            to: consultorAccount.email,
-            subject: 'Pedido Rejeitado - PINT',
-            html: emailTemplates.requestRejected({
-              userName: consultorAccount.nome || 'Consultor',
-              badgeName,
-              comment: finalDescription,
-            }),
-          });
+          const emailEnabled = await communicationModel.isEmailEnabledForEvent('Pedido rejeitado');
+          if (emailEnabled) {
+            await sendEmail({
+              to: consultorAccount.email,
+              subject: 'Pedido Rejeitado - PINT',
+              html: emailTemplates.requestRejected({
+                userName: consultorAccount.nome || 'Consultor',
+                badgeName,
+                comment: finalDescription,
+              }),
+            });
+          }
         }
       }
     } catch (emailError) {

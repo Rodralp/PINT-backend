@@ -1,9 +1,12 @@
-import { QueryTypes } from 'sequelize';
+import { QueryTypes, Op } from 'sequelize';
 import { consultorModel } from './consultorModel.js';
 import { adminBadgeModel } from './adminBadgeModel.js';
 import { sequelize } from '../config/database.js';
 import { Account } from './sql/Account.js';
 import { SllLeaderSl } from './sql/SllLeaderSl.js';
+import { BadgePertenceSL } from './sql/BadgePertenceSL.js';
+import { CObtemBadge } from './sql/CObtemBadge.js';
+import { Pedido } from './sql/Pedido.js';
 
 const { loadBadgeImagesBatch } = adminBadgeModel;
 const { resolveBadgeImage, resolveBadgeTemplate, isSpecialTypeName } = consultorModel;
@@ -50,7 +53,7 @@ const managerRoleSet = new Set(['talent-manager', 'service-line-leader', 'admin-
 const defaultManagerDashboard = Object.freeze({
   badgesTimelineValues: Array.from({ length: MANAGER_BADGES_TIMELINE_DAYS }, () => 0),
   novosConsultoresValues: Array.from({ length: MANAGER_NEW_CONSULTORES_DAYS }, () => 0),
-  onlineUsers: 0,
+  consultoresCount: 0,
   pendingRequests: 0,
   topConsultores: [],
   recentActivities: [],
@@ -203,6 +206,58 @@ const buildScopedBadgeCondition = (badgeColumn) => `
   )
 `;
 
+const countConsultorsByServiceLineScope = async (scope, countAllUsers = false) => {
+  if (!scope.hasServiceLineScope) {
+    const where = { status: 'ativo' };
+    if (!countAllUsers) {
+      where[Op.and] = sequelize.where(
+        sequelize.fn('LOWER', sequelize.col('permissoes')),
+        { [Op.like]: '%consultor%' },
+      );
+    }
+    return Account.count({ where });
+  }
+
+  const slBadges = await BadgePertenceSL.findAll({
+    where: { nsline: { [Op.in]: scope.serviceLineIds } },
+    attributes: ['nbadge'],
+    raw: true,
+  });
+  const badgeIds = slBadges.map((b) => b.nbadge).filter(Boolean);
+  if (badgeIds.length === 0) return 0;
+
+  const [obtained, requested] = await Promise.all([
+    CObtemBadge.findAll({
+      where: { nbadge: { [Op.in]: badgeIds } },
+      attributes: ['nutilizador'],
+      raw: true,
+    }),
+    Pedido.findAll({
+      where: { nbadge: { [Op.in]: badgeIds } },
+      attributes: ['nutilizador'],
+      raw: true,
+    }),
+  ]);
+
+  const consultorIds = [...new Set([
+    ...obtained.map((c) => c.nutilizador),
+    ...requested.map((c) => c.nutilizador),
+  ])].filter((id) => id > 0);
+
+  if (consultorIds.length === 0) return 0;
+
+  return Account.count({
+    where: {
+      id: { [Op.in]: consultorIds },
+      status: 'ativo',
+      [Op.and]: sequelize.where(
+        sequelize.fn('LOWER', sequelize.col('permissoes')),
+        { [Op.like]: '%consultor%' },
+      ),
+    },
+  });
+};
+
 const getPendingStatesByRole = (role) => {
   if (role === 'service-line-leader') {
     return ['pendente-sll'];
@@ -249,7 +304,7 @@ const getManagerDashboardDataFromDb = async (role, accountId) => {
 
 
 
-  const [badgesTimelineRows, novosConsultoresRows, onlineUsersRows, pendingRequestsRows, topConsultoresRows, activitiesRows] = await Promise.all([
+  const [badgesTimelineRows, novosConsultoresRows, consultoresCountRows, pendingRequestsRows, topConsultoresRows, activitiesRows] = await Promise.all([
     sequelize.query(
       `
         WITH latest AS (
@@ -303,16 +358,7 @@ const getManagerDashboardDataFromDb = async (role, accountId) => {
         type: QueryTypes.SELECT,
       },
     ),
-    sequelize.query(
-      `
-        SELECT COUNT(*)::int AS total
-        FROM utilizador AS u
-        WHERE LOWER(COALESCE(u.status, '')) = 'ativo'
-      `,
-      {
-        type: QueryTypes.SELECT,
-      },
-    ),
+    countConsultorsByServiceLineScope(scope, role === 'admin-gestor').then((total) => [{ total }]),
     sequelize.query(
       `
         WITH latest AS (
@@ -490,7 +536,7 @@ const getManagerDashboardDataFromDb = async (role, accountId) => {
   const result = {
     badgesTimelineValues: buildDailySeries(badgesTimelineRows, MANAGER_BADGES_TIMELINE_DAYS),
     novosConsultoresValues: buildDailySeries(novosConsultoresRows, MANAGER_NEW_CONSULTORES_DAYS),
-    onlineUsers: Number(onlineUsersRows?.[0]?.total) || 0,
+    consultoresCount: Number(consultoresCountRows?.[0]?.total) || 0,
     pendingRequests: Number(pendingRequestsRows?.[0]?.total) || 0,
     topConsultores,
     recentActivities,

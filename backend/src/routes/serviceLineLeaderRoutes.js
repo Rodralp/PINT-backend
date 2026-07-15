@@ -8,6 +8,7 @@ import {
   getDetalhesConsultorSLL,
   getDetalhesBadgeSLL,
   getHistoricoPorEstado,
+  getHistoricoCandidaturaSLL,
 } from '../controllers/serviceLineLeaderController.js';
 
 const router = Router();
@@ -25,5 +26,6 @@ router.get('/historico/service-line', getHistoricoPorEstado);
 router.get('/historico/area', getHistoricoPorEstado);
 router.get('/historico/badge-estado', getHistoricoPorEstado);
 router.get('/historico/consultor-estado', getHistoricoPorEstado);
+router.get('/historico/candidatura', getHistoricoCandidaturaSLL);
 
 export default router;

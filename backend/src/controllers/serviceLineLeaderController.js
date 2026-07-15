@@ -334,6 +334,7 @@ export const getHistoricoBadgesSLL = async (req, res) => {
         SELECT
           b.nbadge AS id,
           b.b_nome AS name,
+          b.b_descricao AS description,
           a.area,
           n.nivel AS level
         FROM badge b
@@ -672,6 +673,7 @@ export const getDetalhesBadgeSLL = async (req, res) => {
         SELECT
           b.nbadge AS id,
           b.b_nome AS name,
+          b.b_descricao AS description,
           lvl.area AS "areaName",
           sl.sline AS "serviceLineName",
           lvl.nivel AS level,
@@ -970,5 +972,41 @@ export const getHistoricoPorEstado = async (req, res) => {
     res.status(200).json(data);
   } catch (error) {
     res.status(500).json({ message: error?.message || 'Failed to fetch historico por estado.' });
+  }
+};
+
+// Histórico de Candidatura - Service Line Leader
+export const getHistoricoCandidaturaSLL = async (req, res) => {
+  const pedidoId = parseAccountId(req.query?.pedidoId);
+
+  if (!pedidoId) {
+    res.status(400).json({ message: 'Pedido id is required.' });
+    return;
+  }
+
+  try {
+    const rows = await sequelize.query(
+      `
+        SELECT
+          ph.nhistorico AS id,
+          e.estado,
+          COALESCE(u.nome, 'Sistema') AS "utilizadorNome",
+          ph.data_estado AS "dataEstado",
+          ph.descricao
+        FROM pedido_historico ph
+        INNER JOIN estado e ON e.nestado = ph.nestado
+        LEFT JOIN utilizador u ON u.nutilizador = ph.nutilizador
+        WHERE ph.npedido = :pedidoId
+        ORDER BY ph.data_estado ASC
+      `,
+      {
+        replacements: { pedidoId },
+        type: QueryTypes.SELECT,
+      },
+    );
+
+    res.status(200).json(rows);
+  } catch (error) {
+    res.status(500).json({ message: error?.message || 'Failed to fetch candidacy history.' });
   }
 };

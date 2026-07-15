@@ -8,7 +8,6 @@ import { BadgePertenceSL } from './sql/BadgePertenceSL.js';
 import { Log } from './sql/Log.js';
 import { Notificacao } from './sql/Notificacao.js';
 import { FicheiroLog } from './sql/FicheiroLog.js';
-import { ConfigGeral } from './sql/ConfigGeral.js';
 import { ConfigNotificacao } from './sql/ConfigNotificacao.js';
 import { ConfigNotificacaoUtilizador } from './sql/ConfigNotificacaoUtilizador.js';
 
@@ -66,85 +65,10 @@ const normalizeRecipientIds = (ids) => {
 
 const normalizeEventKey = (value) => String(value ?? '').trim().toLowerCase();
 
-const eventNotificationDefaults = [
-  {
-    event: 'Novo registo',
-    admin: true,
-    sll: true,
-    tl: false,
-    consultor: false,
-    email: true,
-    webApp: true,
-  },
-  {
-    event: 'Alteracao de permissoes',
-    admin: true,
-    sll: true,
-    tl: true,
-    consultor: true,
-    email: true,
-    webApp: true,
-  },
-  {
-    event: 'Recebe badge',
-    admin: false,
-    sll: false,
-    tl: false,
-    consultor: true,
-    email: true,
-    webApp: true,
-  },
-  {
-    event: 'Mudanca de credenciais',
-    admin: false,
-    sll: true,
-    tl: true,
-    consultor: false,
-    email: true,
-    webApp: false,
-  },
-  {
-    event: 'Pedido aprovado',
-    admin: true,
-    sll: true,
-    tl: true,
-    consultor: true,
-    email: true,
-    webApp: true,
-  },
-  {
-    event: 'Pedido rejeitado',
-    admin: true,
-    sll: true,
-    tl: true,
-    consultor: true,
-    email: true,
-    webApp: true,
-  },
-  {
-    event: 'Badge a expirar',
-    admin: true,
-    sll: true,
-    tl: true,
-    consultor: true,
-    email: false,
-    webApp: true,
-  },
-  {
-    event: 'Badge expirada',
-    admin: true,
-    sll: true,
-    tl: true,
-    consultor: true,
-    email: false,
-    webApp: true,
-  },
-];
-
 const userNotificationDefaults = [
-  { field: 'emailUpdates', generalKey: 'Notificacoes email', fallback: true },
-  { field: 'inAppAlerts', generalKey: 'Notificacoes in-app', fallback: true },
-  { field: 'weeklySummary', generalKey: 'Resumo semanal', fallback: false },
+  { field: 'emailUpdates', fallback: true },
+  { field: 'inAppAlerts', fallback: true },
+  { field: 'weeklySummary', fallback: false },
 ];
 
 const userNotificationOptions = ['Ativo', 'Inativo'];
@@ -176,90 +100,15 @@ const parseGeneralBoolean = (value, fallback) => {
   return fallback;
 };
 
-const ensureUserNotificationDefaults = async (transaction) => {
-  for (const item of userNotificationDefaults) {
-    await ConfigGeral.findOrCreate({
-      where: { chave: item.generalKey },
-      defaults: {
-        chave: item.generalKey,
-        valor: toGeneralBooleanValue(item.fallback),
-      },
-      transaction,
-    });
-  }
-};
-
-const loadUserNotificationDefaults = async (transaction) => {
-  await ensureUserNotificationDefaults(transaction);
-
-  const keys = userNotificationDefaults.map((item) => item.generalKey);
-  const rows = await ConfigGeral.findAll({
-    where: { chave: { [Op.in]: keys } },
-    attributes: ['chave', 'valor'],
-    transaction,
-    raw: true,
-  });
-
-  const valueByKey = new Map((rows || []).map((row) => [row.chave, row.valor]));
+const loadUserNotificationDefaults = async () => {
   const defaults = {};
-
   userNotificationDefaults.forEach((item) => {
-    defaults[item.field] = parseGeneralBoolean(valueByKey.get(item.generalKey), item.fallback);
+    defaults[item.field] = Boolean(item.fallback);
   });
-
   return defaults;
 };
 
-const ensureEventNotificationDefaults = async (transaction) => {
-  const rows = await ConfigNotificacao.findAll({
-    attributes: ['evento'],
-    transaction,
-    raw: true,
-  });
-  const existingEvents = new Set(
-    (rows || []).map((row) => normalizeEventKey(row?.evento)),
-  );
-
-  const validEvents = new Set(
-    eventNotificationDefaults.map((item) => normalizeEventKey(item.event)),
-  );
-
-  for (const existingEvent of existingEvents) {
-    if (!validEvents.has(existingEvent)) {
-      await ConfigNotificacao.destroy({
-        where: sequelize.where(sequelize.fn('LOWER', sequelize.col('evento')), existingEvent),
-        transaction,
-      });
-    }
-  }
-
-  for (const item of eventNotificationDefaults) {
-    const eventKey = normalizeEventKey(item.event);
-    if (existingEvents.has(eventKey)) {
-      await ConfigNotificacao.update(
-        { admin: item.admin, sll: item.sll, tl: item.tl, consultor: item.consultor, email: item.email, web_app: item.webApp },
-        { where: sequelize.where(sequelize.fn('LOWER', sequelize.col('evento')), eventKey), transaction },
-      );
-      continue;
-    }
-
-    await ConfigNotificacao.create({
-      evento: item.event,
-      admin: item.admin,
-      sll: item.sll,
-      tl: item.tl,
-      consultor: item.consultor,
-      email: item.email,
-      web_app: item.webApp,
-    }, { transaction });
-
-    existingEvents.add(eventKey);
-  }
-};
-
 const fetchEventNotificationConfig = async (eventKey, transaction) => {
-  await ensureEventNotificationDefaults(transaction);
-
   const row = await ConfigNotificacao.findOne({
     where: sequelize.where(sequelize.fn('LOWER', sequelize.col('evento')), String(eventKey || '').trim().toLowerCase()),
     attributes: ['evento', 'admin', 'sll', 'tl', 'consultor', 'email', 'web_app'],
@@ -1055,5 +904,10 @@ export const communicationModel = {
 
       return { logId, recipients: inAppRecipients };
     });
+  },
+
+  async isEmailEnabledForEvent(eventKey) {
+    const config = await fetchEventNotificationConfig(eventKey);
+    return config ? Boolean(config.email) : false;
   },
 };

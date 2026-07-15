@@ -275,10 +275,15 @@ export const deleteReminder = async (req, res) => {
 export const getProfileData = async (req, res) => {
   const accountId = parseAccountId(req.query?.accountId);
 
+  if (!accountId) {
+    return res.status(400).json({ message: 'accountId is required.' });
+  }
+
   try {
     const data = await consultorService.getProfileData(accountId);
     res.status(200).json(data);
   } catch (error) {
+    console.error('getProfileData error:', error);
     res.status(500).json({ message: 'Failed to fetch profile data.', error: error.message });
   }
 };

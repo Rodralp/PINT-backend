@@ -1,5 +1,6 @@
 import { authService } from '../services/authService.js';
 import { UniqueConstraintError, ValidationError } from 'sequelize';
+import { RgpdTopico } from '../models/sql/RgpdTopico.js';
 
 export const register = async (req, res) => {
   const { nome, email, senha } = req.body ?? {};
@@ -82,15 +83,41 @@ export const recoverPassword = async (req, res) => {
   }
 
   try {
-    const password = await authService.recoverPassword(email);
-    if (!password) {
+    const accountData = await authService.recoverPassword(email);
+    if (!accountData) {
       res.status(404).json({ message: 'Email not found.' });
       return;
     }
 
-    res.status(200).json({ password });
+    res.status(200).json({ accountId: accountData.id });
   } catch {
     res.status(500).json({ message: 'Failed to recover password.' });
+  }
+};
+
+export const resetPassword = async (req, res) => {
+  const { email, newPassword } = req.body ?? {};
+
+  if (!email || !newPassword) {
+    res.status(400).json({ message: 'Email and new password are required.' });
+    return;
+  }
+
+  if (typeof newPassword !== 'string' || newPassword.length < 6) {
+    res.status(400).json({ message: 'Password must be at least 6 characters.' });
+    return;
+  }
+
+  try {
+    const account = await authService.resetPassword(email, newPassword);
+    if (!account) {
+      res.status(404).json({ message: 'Email not found.' });
+      return;
+    }
+
+    res.status(200).json(account);
+  } catch {
+    res.status(500).json({ message: 'Failed to reset password.' });
   }
 };
 
@@ -207,5 +234,24 @@ export const decidePendingUser = async (req, res) => {
   } catch (error) {
     const statusCode = Number(error?.statusCode) || 500;
     res.status(statusCode).json({ message: error?.message || 'Failed to process decision.' });
+  }
+};
+
+export const listRgpdTopics = async (_req, res) => {
+  try {
+    const rows = await RgpdTopico.findAll({
+      order: [['ordem', 'ASC'], ['nrgpd', 'ASC']],
+    });
+
+    const topics = (rows || []).map((row) => ({
+      id: Number(row?.nrgpd),
+      title: row?.titulo || '',
+      body: row?.corpo || '',
+      order: Number(row?.ordem) || 0,
+    }));
+
+    res.status(200).json(topics);
+  } catch (error) {
+    res.status(500).json({ message: error?.message || 'Failed to fetch RGPD topics.' });
   }
 };
