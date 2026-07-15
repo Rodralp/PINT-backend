@@ -76,12 +76,72 @@ const defaultNotificationRows = [
     email: false,
     webApp: true,
   },
+  {
+    event: 'Pedido submetido ao TM',
+    admin: false,
+    sll: false,
+    tl: true,
+    consultor: false,
+    email: true,
+    webApp: true,
+  },
+  {
+    event: 'Pedido encaminhado para SLL',
+    admin: false,
+    sll: true,
+    tl: false,
+    consultor: false,
+    email: true,
+    webApp: true,
+  },
+  {
+    event: 'Confirmacao aprovacao TM',
+    admin: false,
+    sll: false,
+    tl: true,
+    consultor: false,
+    email: true,
+    webApp: false,
+  },
+  {
+    event: 'Confirmacao aprovacao SLL',
+    admin: false,
+    sll: true,
+    tl: false,
+    consultor: false,
+    email: true,
+    webApp: false,
+  },
+  {
+    event: 'Confirmacao rejeicao TM',
+    admin: false,
+    sll: false,
+    tl: true,
+    consultor: false,
+    email: true,
+    webApp: false,
+  },
+  {
+    event: 'Confirmacao rejeicao SLL',
+    admin: false,
+    sll: true,
+    tl: false,
+    consultor: false,
+    email: true,
+    webApp: false,
+  },
 ];
 
 const EMAIL_SUPPORTED_EVENTS = new Set([
   'novo registo',
   'pedido aprovado',
   'pedido rejeitado',
+  'pedido submetido ao tm',
+  'pedido encaminhado para sll',
+  'confirmacao aprovacao tm',
+  'confirmacao aprovacao sll',
+  'confirmacao rejeicao tm',
+  'confirmacao rejeicao sll',
 ]);
 
 const defaultRgpdTopics = [
@@ -295,6 +355,12 @@ const normalizeRgpdUpdate = (row) => {
 };
 
 export const adminGeneralManagementModel = {
+  async ensureNotificationDefaults() {
+    return sequelize.transaction(async (transaction) => {
+      await ensureNotificationDefaults(transaction);
+    });
+  },
+
   async listGeneralManagement() {
     return sequelize.transaction(async (transaction) => {
       await ensureDefaults(transaction);

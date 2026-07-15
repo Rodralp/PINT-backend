@@ -236,10 +236,10 @@ const resolveBadgeImage = (customImage, fallbackImage, isSpecial = false) => {
   }
 
   if (isSpecial) {
-    return '/badges/default.png';
+    return '/badges/badge-not-found.svg';
   }
 
-  return fallbackImage || '/badges/default.png';
+  return fallbackImage || '/badges/badge-not-found.svg';
 };
 
 const hasActiveBadgeRequest = (status) =>
@@ -2218,7 +2218,7 @@ const requestBadgeAcquisition = async (accountId, badgeId) => {
       descricao: 'Candidatura submetida para validação.',
     });
 
-    // Send email confirmation of submission to TM
+    // Send email confirmation of submission to consultor
     try {
       const consultorInfo = await Account.findByPk(Number(utilizadorId), {
         attributes: ['nome', 'email'],
@@ -2237,6 +2237,32 @@ const requestBadgeAcquisition = async (accountId, badgeId) => {
             badgeName: badgeInfo?.b_nome || 'Badge',
           }),
         });
+      }
+
+      // Send email to all active Talent Managers
+      const emailEnabled = await communicationModel.isEmailEnabledForEvent('Pedido submetido ao TM');
+      if (emailEnabled) {
+        const tmRows = await Account.findAll({
+          where: {
+            status: 'ativo',
+            permissoes: { [Op.iLike]: '%talent-manager%' },
+          },
+          attributes: ['nome', 'email'],
+          raw: true,
+        });
+        for (const tm of tmRows) {
+          if (tm.email) {
+            await sendEmail({
+              to: tm.email,
+              subject: 'Novo Pedido de Badge - PINT',
+              html: emailTemplates.requestSubmittedToManager({
+                managerName: tm.nome || 'Talent Manager',
+                consultorName: consultorInfo?.nome || 'Consultor',
+                badgeName: badgeInfo?.b_nome || 'Badge',
+              }),
+            });
+          }
+        }
       }
     } catch (emailError) {
       console.error('Failed to send request submission email.', emailError);

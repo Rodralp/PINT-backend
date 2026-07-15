@@ -24,22 +24,29 @@ const startServer = async () => {
     await syncDatabase();
     await seedDatabase();
 
-    app.listen(PORT, () => {
-      console.log(`API running on http://localhost:${PORT}`);
-    });
+    // Ensure notification event defaults exist in config_notificacao
+    try {
+      const { adminGeneralManagementModel } = await import('./models/adminGeneralManagementModel.js');
+      await adminGeneralManagementModel.ensureNotificationDefaults();
+    } catch (notifError) {
+      console.error('Failed to ensure notification defaults:', notifError);
+    }
 
     if (emailConfig.auth.user && emailConfig.auth.pass) {
-      const transporter = nodemailer.createTransport({
-        host: emailConfig.host,
-        port: emailConfig.port,
-        secure: emailConfig.secure,
-        auth: emailConfig.auth,
-        connectionTimeout: 10000,
-        greetingTimeout: 5000,
-      });
-      transporter.verify()
-        .then(() => console.log('SMTP connection verified successfully.'))
-        .catch((emailError) => console.warn('SMTP verification failed. Emails may not be sent.', emailError?.message || emailError));
+      try {
+        const transporter = nodemailer.createTransport({
+          host: emailConfig.host,
+          port: emailConfig.port,
+          secure: emailConfig.secure,
+          auth: emailConfig.auth,
+          connectionTimeout: 10000,
+          greetingTimeout: 5000,
+        });
+        await transporter.verify();
+        console.log('SMTP connection verified successfully.');
+      } catch (emailError) {
+        console.warn('SMTP verification failed. Emails may not be sent.', emailError?.message || emailError);
+      }
     } else {
       console.warn('Email not configured (EMAIL_USER/EMAIL_PASS missing). Email features disabled.');
     }
@@ -54,6 +61,10 @@ const startServer = async () => {
           console.error('Scheduled side-effects error:', err);
         });
     }, SIDE_EFFECT_INTERVAL_MS);
+
+    app.listen(PORT, () => {
+      console.log(`API running on http://localhost:${PORT}`);
+    });
   } catch (error) {
     console.error('Failed to start API server:', error);
     globalThis.process?.exit(1);

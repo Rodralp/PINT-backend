@@ -1,4 +1,4 @@
-import { QueryTypes } from 'sequelize';
+import { QueryTypes, Op } from 'sequelize';
 import fs from 'node:fs';
 import path from 'node:path';
 import { sequelize } from '../config/database.js';
@@ -1069,6 +1069,13 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
         attributes: ['nome', 'email'],
       });
       const badgeName = request.badge_nome || request.area_nome || 'Badge';
+      const consultorName = consultorAccount?.nome || request.consultor_nome || 'Consultor';
+
+      // Get actor info for confirmation emails
+      const actorAccount = await Account.findByPk(Number(actorUtilizadorId), {
+        attributes: ['nome', 'email'],
+      });
+      const actorName = actorAccount?.nome || 'Gestor';
 
       if (consultorAccount?.email) {
         if (shouldNotifyApproval) {
@@ -1098,6 +1105,152 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
               }),
             });
           }
+        }
+      }
+
+      // TM approves → email to SLL + confirmation to TM
+      if (shouldNotifyApproval && role === 'talent-manager') {
+        try {
+          const serviceLineId = await getServiceLineIdForBadge(request.nbadge);
+          if (serviceLineId) {
+            const sllEmailEnabled = await communicationModel.isEmailEnabledForEvent('Pedido encaminhado para SLL');
+            if (sllEmailEnabled) {
+              const sllRows = await sequelize.query(
+                `
+                  SELECT u.nome, u.email
+                  FROM sll_leader_sl AS sll
+                  INNER JOIN utilizador AS u ON u.nutilizador = sll.nutilizador
+                  WHERE sll.nsline = :serviceLineId AND LOWER(u.status) = 'ativo'
+                `,
+                {
+                  replacements: { serviceLineId },
+                  type: QueryTypes.SELECT,
+                },
+              );
+              for (const sll of sllRows) {
+                if (sll.email) {
+                  await sendEmail({
+                    to: sll.email,
+                    subject: 'Pedido Encaminhado para Validacao - PINT',
+                    html: emailTemplates.requestApprovedForwardedToSLL({
+                      sllName: sll.nome || 'Service Line Leader',
+                      consultorName,
+                      badgeName,
+                    }),
+                  });
+                }
+              }
+            }
+          }
+        } catch (sllEmailError) {
+          console.error('Failed to send SLL forwarded email.', sllEmailError);
+        }
+
+        // Confirmation to TM
+        try {
+          const tmConfirmEnabled = await communicationModel.isEmailEnabledForEvent('Confirmacao aprovacao TM');
+          if (tmConfirmEnabled && actorAccount?.email) {
+            await sendEmail({
+              to: actorAccount.email,
+              subject: 'Aprovacao Registada - PINT',
+              html: emailTemplates.managerApprovalConfirmation({
+                managerName: actorName,
+                consultorName,
+                badgeName,
+              }),
+            });
+          }
+        } catch (confirmError) {
+          console.error('Failed to send TM approval confirmation.', confirmError);
+        }
+      }
+
+      // SLL/Admin approves → email to TM (badge awarded) + confirmation to SLL
+      if (shouldObtainBadge && role !== 'talent-manager') {
+        try {
+          const tmEmailEnabled = await communicationModel.isEmailEnabledForEvent('Pedido submetido ao TM');
+          if (tmEmailEnabled) {
+            const tmRows = await Account.findAll({
+              where: { status: 'ativo', permissoes: { [Op.iLike]: '%talent-manager%' } },
+              attributes: ['nome', 'email'],
+              raw: true,
+            });
+            for (const tm of tmRows) {
+              if (tm.email) {
+                await sendEmail({
+                  to: tm.email,
+                  subject: 'Badge Atribuida - PINT',
+                  html: emailTemplates.requestSubmittedToManager({
+                    managerName: tm.nome || 'Talent Manager',
+                    consultorName,
+                    badgeName,
+                  }),
+                });
+              }
+            }
+          }
+        } catch (tmEmailError) {
+          console.error('Failed to send TM badge awarded email.', tmEmailError);
+        }
+
+        // Confirmation to SLL (only if actor is SLL)
+        if (role === 'service-line-leader') {
+          try {
+            const sllConfirmEnabled = await communicationModel.isEmailEnabledForEvent('Confirmacao aprovacao SLL');
+            if (sllConfirmEnabled && actorAccount?.email) {
+              await sendEmail({
+                to: actorAccount.email,
+                subject: 'Aprovacao Registada - PINT',
+                html: emailTemplates.sllApprovalConfirmation({
+                  sllName: actorName,
+                  consultorName,
+                  badgeName,
+                }),
+              });
+            }
+          } catch (confirmError) {
+            console.error('Failed to send SLL approval confirmation.', confirmError);
+          }
+        }
+      }
+
+      // TM rejects → confirmation to TM
+      if (shouldNotifyRejection && role === 'talent-manager') {
+        try {
+          const tmConfirmEnabled = await communicationModel.isEmailEnabledForEvent('Confirmacao rejeicao TM');
+          if (tmConfirmEnabled && actorAccount?.email) {
+            await sendEmail({
+              to: actorAccount.email,
+              subject: 'Rejeicao Registada - PINT',
+              html: emailTemplates.managerRejectionConfirmation({
+                managerName: actorName,
+                consultorName,
+                badgeName,
+              }),
+            });
+          }
+        } catch (confirmError) {
+          console.error('Failed to send TM rejection confirmation.', confirmError);
+        }
+      }
+
+      // SLL rejects → confirmation to SLL
+      if (shouldNotifyRejection && role === 'service-line-leader') {
+        try {
+          const sllConfirmEnabled = await communicationModel.isEmailEnabledForEvent('Confirmacao rejeicao SLL');
+          if (sllConfirmEnabled && actorAccount?.email) {
+            await sendEmail({
+              to: actorAccount.email,
+              subject: 'Rejeicao Registada - PINT',
+              html: emailTemplates.sllRejectionConfirmation({
+                sllName: actorName,
+                consultorName,
+                badgeName,
+              }),
+            });
+          }
+        } catch (confirmError) {
+          console.error('Failed to send SLL rejection confirmation.', confirmError);
         }
       }
     } catch (emailError) {

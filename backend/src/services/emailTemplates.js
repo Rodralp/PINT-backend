@@ -88,4 +88,57 @@ export const emailTemplates = {
       ${comment ? '<p><strong>Motivo:</strong> ' + comment + '</p>' : ''}
       <p>Se tiver duvidas, contacte o seu Talent Manager ou Service Line Leader.</p>
     `),
+
+  requestSubmittedToManager: ({ managerName, consultorName, badgeName }) =>
+    wrapTemplate('Novo Pedido de Badge', `
+      <p>Ola <strong>${managerName}</strong>,</p>
+      <p>O consultor <strong>${consultorName}</strong> submeteu um novo pedido da badge <strong>${badgeName}</strong>.</p>
+      <p>Pode rever o pedido na plataforma na secao de gestao de pedidos.</p>
+      <p>
+        <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/talent-manager/gestao-pedidos"
+           style="${buttonStyle}">
+          Reverter Pedido
+        </a>
+      </p>
+    `),
+
+  requestApprovedForwardedToSLL: ({ sllName, consultorName, badgeName }) =>
+    wrapTemplate('Pedido Encaminhado para Validacao', `
+      <p>Ola <strong>${sllName}</strong>,</p>
+      <p>O pedido da badge <strong>${badgeName}</strong> do consultor <strong>${consultorName}</strong> foi aprovado pelo Talent Manager e aguarda a sua validacao.</p>
+      <p>
+        <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/service-line-leader/gestao-pedidos"
+           style="${buttonStyle}">
+          Reverter Pedido
+        </a>
+      </p>
+    `),
+
+  managerApprovalConfirmation: ({ managerName, consultorName, badgeName }) =>
+    wrapTemplate('Aprovacao Registada', `
+      <p>Ola <strong>${managerName}</strong>,</p>
+      <p>A sua aprovacao do pedido da badge <strong>${badgeName}</strong> do consultor <strong>${consultorName}</strong> foi registada com sucesso.</p>
+      <p>O pedido foi encaminhado para o Service Line Leader para validacao final.</p>
+    `),
+
+  sllApprovalConfirmation: ({ sllName, consultorName, badgeName }) =>
+    wrapTemplate('Aprovacao Registada', `
+      <p>Ola <strong>${sllName}</strong>,</p>
+      <p>A sua aprovacao do pedido da badge <strong>${badgeName}</strong> do consultor <strong>${consultorName}</strong> foi registada com sucesso.</p>
+      <p>A badge foi atribuida ao consultor e esta disponivel no perfil dele.</p>
+    `),
+
+  managerRejectionConfirmation: ({ managerName, consultorName, badgeName }) =>
+    wrapTemplate('Rejeicao Registada', `
+      <p>Ola <strong>${managerName}</strong>,</p>
+      <p>A sua rejeicao do pedido da badge <strong>${badgeName}</strong> do consultor <strong>${consultorName}</strong> foi registada com sucesso.</p>
+      <p>O consultor foi notificado da decisao.</p>
+    `),
+
+  sllRejectionConfirmation: ({ sllName, consultorName, badgeName }) =>
+    wrapTemplate('Rejeicao Registada', `
+      <p>Ola <strong>${sllName}</strong>,</p>
+      <p>A sua rejeicao do pedido da badge <strong>${badgeName}</strong> do consultor <strong>${consultorName}</strong> foi registada com sucesso.</p>
+      <p>O consultor foi notificado da decisao.</p>
+    `),
 };
