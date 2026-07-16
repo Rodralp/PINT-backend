@@ -1108,13 +1108,15 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
         }
       }
 
-      // TM approves → email to SLL + confirmation to TM
+      // TM approves → email to SLL + admin (deduplicated) + confirmation to TM
       if (shouldNotifyApproval && role === 'talent-manager') {
         try {
           const serviceLineId = await getServiceLineIdForBadge(request.nbadge);
           if (serviceLineId) {
             const sllEmailEnabled = await communicationModel.isEmailEnabledForEvent('Pedido encaminhado para SLL');
             if (sllEmailEnabled) {
+              const recipientMap = new Map();
+
               const sllRows = await sequelize.query(
                 `
                   SELECT u.nome, u.email
@@ -1128,20 +1130,11 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
                 },
               );
               for (const sll of sllRows) {
-                if (sll.email) {
-                  sendEmailAsync({
-                    to: sll.email,
-                    subject: 'Pedido Encaminhado para Validacao - PINT',
-                    html: emailTemplates.requestApprovedForwardedToSLL({
-                      sllName: sll.nome || 'Service Line Leader',
-                      consultorName,
-                      badgeName,
-                    }),
-                  });
+                if (sll.email && !recipientMap.has(sll.email.toLowerCase())) {
+                  recipientMap.set(sll.email.toLowerCase(), { nome: sll.nome, role: 'Service Line Leader' });
                 }
               }
 
-              // Send email to all active admin-gestors
               const adminRows = await Account.findAll({
                 where: {
                   status: 'ativo',
@@ -1151,17 +1144,21 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
                 raw: true,
               });
               for (const admin of adminRows) {
-                if (admin.email) {
-                  sendEmailAsync({
-                    to: admin.email,
-                    subject: 'Pedido Encaminhado para Validacao - PINT',
-                    html: emailTemplates.requestApprovedForwardedToSLL({
-                      sllName: admin.nome || 'Administrador',
-                      consultorName,
-                      badgeName,
-                    }),
-                  });
+                if (admin.email && !recipientMap.has(admin.email.toLowerCase())) {
+                  recipientMap.set(admin.email.toLowerCase(), { nome: admin.nome, role: 'Administrador' });
                 }
+              }
+
+              for (const [email, { nome, role: recipientRole }] of recipientMap) {
+                sendEmailAsync({
+                  to: email,
+                  subject: 'Pedido Encaminhado para Validacao - PINT',
+                  html: emailTemplates.requestApprovedForwardedToSLL({
+                    sllName: nome || recipientRole,
+                    consultorName,
+                    badgeName,
+                  }),
+                });
               }
             }
           }
@@ -1188,48 +1185,45 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
         }
       }
 
-      // SLL/Admin approves → email to TM (badge awarded) + confirmation to SLL
+      // SLL/Admin approves → email to TMs + admin (deduplicated) + confirmation to SLL
       if (shouldObtainBadge && role !== 'talent-manager') {
         try {
           const tmEmailEnabled = await communicationModel.isEmailEnabledForEvent('Pedido submetido ao TM');
           if (tmEmailEnabled) {
+            const recipientMap = new Map();
+
             const tmRows = await Account.findAll({
               where: { status: 'ativo', permissoes: { [Op.iLike]: '%talent-manager%' } },
               attributes: ['nome', 'email'],
               raw: true,
             });
             for (const tm of tmRows) {
-              if (tm.email) {
-                sendEmailAsync({
-                  to: tm.email,
-                  subject: 'Badge Atribuida - PINT',
-                  html: emailTemplates.requestSubmittedToManager({
-                    managerName: tm.nome || 'Talent Manager',
-                    consultorName,
-                    badgeName,
-                  }),
-                });
+              if (tm.email && !recipientMap.has(tm.email.toLowerCase())) {
+                recipientMap.set(tm.email.toLowerCase(), { nome: tm.nome, role: 'Talent Manager' });
               }
             }
 
-            // Send email to all active admin-gestors
             const adminRows = await Account.findAll({
               where: { status: 'ativo', permissoes: { [Op.iLike]: '%admin-gestor%' } },
               attributes: ['nome', 'email'],
               raw: true,
             });
             for (const admin of adminRows) {
-              if (admin.email) {
-                sendEmailAsync({
-                  to: admin.email,
-                  subject: 'Badge Atribuida - PINT',
-                  html: emailTemplates.requestSubmittedToManager({
-                    managerName: admin.nome || 'Administrador',
-                    consultorName,
-                    badgeName,
-                  }),
-                });
+              if (admin.email && !recipientMap.has(admin.email.toLowerCase())) {
+                recipientMap.set(admin.email.toLowerCase(), { nome: admin.nome, role: 'Administrador' });
               }
+            }
+
+            for (const [email, { nome, role: recipientRole }] of recipientMap) {
+              sendEmailAsync({
+                to: email,
+                subject: 'Badge Atribuida - PINT',
+                html: emailTemplates.requestSubmittedToManager({
+                  managerName: nome || recipientRole,
+                  consultorName,
+                  badgeName,
+                }),
+              });
             }
           }
         } catch (tmEmailError) {

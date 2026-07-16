@@ -2239,9 +2239,11 @@ const requestBadgeAcquisition = async (accountId, badgeId) => {
         });
       }
 
-      // Send email to all active Talent Managers
+      // Send email to all active Talent Managers + admin-gestors (deduplicated)
       const emailEnabled = await communicationModel.isEmailEnabledForEvent('Pedido submetido ao TM');
       if (emailEnabled) {
+        const recipientMap = new Map();
+
         const tmRows = await Account.findAll({
           where: {
             status: 'ativo',
@@ -2251,20 +2253,11 @@ const requestBadgeAcquisition = async (accountId, badgeId) => {
           raw: true,
         });
         for (const tm of tmRows) {
-          if (tm.email) {
-            sendEmailAsync({
-              to: tm.email,
-              subject: 'Novo Pedido de Badge - PINT',
-              html: emailTemplates.requestSubmittedToManager({
-                managerName: tm.nome || 'Talent Manager',
-                consultorName: consultorInfo?.nome || 'Consultor',
-                badgeName: badgeInfo?.b_nome || 'Badge',
-              }),
-            });
+          if (tm.email && !recipientMap.has(tm.email.toLowerCase())) {
+            recipientMap.set(tm.email.toLowerCase(), { nome: tm.nome, role: 'Talent Manager' });
           }
         }
 
-        // Send email to all active admin-gestors
         const adminRows = await Account.findAll({
           where: {
             status: 'ativo',
@@ -2274,17 +2267,21 @@ const requestBadgeAcquisition = async (accountId, badgeId) => {
           raw: true,
         });
         for (const admin of adminRows) {
-          if (admin.email) {
-            sendEmailAsync({
-              to: admin.email,
-              subject: 'Novo Pedido de Badge - PINT',
-              html: emailTemplates.requestSubmittedToManager({
-                managerName: admin.nome || 'Administrador',
-                consultorName: consultorInfo?.nome || 'Consultor',
-                badgeName: badgeInfo?.b_nome || 'Badge',
-              }),
-            });
+          if (admin.email && !recipientMap.has(admin.email.toLowerCase())) {
+            recipientMap.set(admin.email.toLowerCase(), { nome: admin.nome, role: 'Administrador' });
           }
+        }
+
+        for (const [email, { nome, role }] of recipientMap) {
+          sendEmailAsync({
+            to: email,
+            subject: 'Novo Pedido de Badge - PINT',
+            html: emailTemplates.requestSubmittedToManager({
+              managerName: nome || role,
+              consultorName: consultorInfo?.nome || 'Consultor',
+              badgeName: badgeInfo?.b_nome || 'Badge',
+            }),
+          });
         }
       }
     } catch (emailError) {
