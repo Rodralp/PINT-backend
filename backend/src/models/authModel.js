@@ -7,7 +7,7 @@ import { Preferencia } from './sql/Preferencia.js';
 import { ServiceLine } from './sql/ServiceLine.js';
 import { SllLeaderSl } from './sql/SllLeaderSl.js';
 import { communicationModel } from './communicationModel.js';
-import { sendEmail } from '../services/emailService.js';
+import { sendEmailAsync } from '../services/emailService.js';
 import { emailTemplates } from '../services/emailTemplates.js';
 
 const DEFAULT_ROLE = 'consultor';
@@ -177,7 +177,7 @@ export const authModel = {
     try {
       const emailEnabled = await communicationModel.isEmailEnabledForEvent('Novo registo');
       if (emailEnabled) {
-        await sendEmail({
+        sendEmailAsync({
           to: account.email,
           subject: 'Registo Recebido - PINT',
           html: emailTemplates.registrationReceived({ userName: account.nome || 'Utilizador' }),
@@ -190,7 +190,7 @@ export const authModel = {
         });
         for (const admin of adminRows) {
           if (admin.email) {
-            await sendEmail({
+            sendEmailAsync({
               to: admin.email,
               subject: 'Novo Registo Pendente - PINT',
               html: emailTemplates.newRegistrationPending({
@@ -492,7 +492,7 @@ export const authModel = {
       try {
         const emailEnabled = await communicationModel.isEmailEnabledForEvent('Novo registo');
         if (emailEnabled && mappedUser.email) {
-          await sendEmail({
+          sendEmailAsync({
             to: mappedUser.email,
             subject: 'Conta Aprovada - PINT',
             html: emailTemplates.registrationApproved({ userName: mappedUser.nome || 'Utilizador' }),
@@ -658,7 +658,7 @@ export const authModel = {
         const emailEnabled = await communicationModel.isEmailEnabledForEvent('Novo registo');
         if (emailEnabled) {
           try {
-            await sendEmail({
+            sendEmailAsync({
               to: userAccount.email,
               subject: 'Conta Aprovada - PINT',
               html: emailTemplates.registrationApproved({ userName: userAccount.nome || 'Utilizador' }),

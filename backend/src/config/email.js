@@ -1,20 +1,16 @@
 import 'dotenv/config';
 
 const {
-  EMAIL_HOST = 'smtp.gmail.com',
-  EMAIL_PORT = '587',
   EMAIL_USER = '',
-  EMAIL_PASS = '',
   EMAIL_FROM = '',
+  BREVO_API_KEY = '',
+  FRONTEND_URL = '',
 } = globalThis.process?.env ?? {};
 
 export const emailConfig = {
-  host: EMAIL_HOST,
-  port: Number(EMAIL_PORT),
-  secure: Number(EMAIL_PORT) === 465,
-  auth: {
-    user: EMAIL_USER,
-    pass: EMAIL_PASS,
-  },
+  brevoApiKey: BREVO_API_KEY,
+  senderEmail: EMAIL_USER,
+  senderName: 'PINT',
   from: EMAIL_FROM || EMAIL_USER,
+  frontendUrl: FRONTEND_URL || 'http://localhost:5173',
 };

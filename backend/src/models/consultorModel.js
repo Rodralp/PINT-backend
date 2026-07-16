@@ -18,7 +18,7 @@ import { sequelize } from '../config/database.js';
 import { adminBadgeModel } from './adminBadgeModel.js';
 const { loadBadgeImagesBatch } = adminBadgeModel;
 import { communicationModel } from './communicationModel.js';
-import { sendEmail } from '../services/emailService.js';
+import { sendEmailAsync } from '../services/emailService.js';
 import { emailTemplates } from '../services/emailTemplates.js';
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -2229,7 +2229,7 @@ const requestBadgeAcquisition = async (accountId, badgeId) => {
         raw: true,
       });
       if (consultorInfo?.email) {
-        await sendEmail({
+        sendEmailAsync({
           to: consultorInfo.email,
           subject: 'Pedido de Badge Enviado - PINT',
           html: emailTemplates.requestSubmittedToTM({
@@ -2252,7 +2252,7 @@ const requestBadgeAcquisition = async (accountId, badgeId) => {
         });
         for (const tm of tmRows) {
           if (tm.email) {
-            await sendEmail({
+            sendEmailAsync({
               to: tm.email,
               subject: 'Novo Pedido de Badge - PINT',
               html: emailTemplates.requestSubmittedToManager({
@@ -2275,7 +2275,7 @@ const requestBadgeAcquisition = async (accountId, badgeId) => {
         });
         for (const admin of adminRows) {
           if (admin.email) {
-            await sendEmail({
+            sendEmailAsync({
               to: admin.email,
               subject: 'Novo Pedido de Badge - PINT',
               html: emailTemplates.requestSubmittedToManager({

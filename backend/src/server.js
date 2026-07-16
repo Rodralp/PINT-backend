@@ -1,9 +1,7 @@
 import app from './app.js';
-import nodemailer from 'nodemailer';
 import { connectToDatabase, syncDatabase } from './config/database.js';
 import { seedDatabase } from './config/seedData.js';
 import { emailConfig } from './config/email.js';
-
 
 const PORT = Number(globalThis.process?.env?.PORT) || 4000;
 
@@ -33,23 +31,10 @@ const startServer = async () => {
       console.error('Failed to ensure notification defaults:', notifError);
     }
 
-    if (emailConfig.auth.user && emailConfig.auth.pass) {
-      try {
-        const transporter = nodemailer.createTransport({
-          host: emailConfig.host,
-          port: emailConfig.port,
-          secure: emailConfig.secure,
-          auth: emailConfig.auth,
-          connectionTimeout: 10000,
-          greetingTimeout: 10000,
-        });
-        await transporter.verify();
-        console.log('SMTP connection verified successfully.');
-      } catch (emailError) {
-        console.warn('SMTP verification failed. Emails may not be sent.', emailError?.message || emailError);
-      }
+    if (emailConfig.brevoApiKey && emailConfig.senderEmail) {
+      console.log(`Email configured: Brevo API ready (sender: ${emailConfig.senderEmail}).`);
     } else {
-      console.warn('Email not configured (EMAIL_USER+EMAIL_PASS missing). Email features disabled.');
+      console.warn('Email not configured (BREVO_API_KEY / EMAIL_USER missing). Email features disabled.');
     }
 
     const { requestManagementModel } = await import('./models/requestManagementModel.js');

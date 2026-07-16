@@ -16,7 +16,7 @@ import { AdmGereP } from './sql/AdmGereP.js';
 import { PedidoHistorico } from './sql/PedidoHistorico.js';
 import { syncSpecialBadgesForConsultor } from './consultorModel.js';
 import { communicationModel } from './communicationModel.js';
-import { sendEmail } from '../services/emailService.js';
+import { sendEmailAsync } from '../services/emailService.js';
 import { emailTemplates } from '../services/emailTemplates.js';
 import { adminBadgeModel } from './adminBadgeModel.js';
 
@@ -1081,7 +1081,7 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
         if (shouldNotifyApproval) {
           const emailEnabled = await communicationModel.isEmailEnabledForEvent('Pedido aprovado');
           if (emailEnabled) {
-            await sendEmail({
+            sendEmailAsync({
               to: consultorAccount.email,
               subject: 'Pedido Aprovado - PINT',
               html: emailTemplates.requestApproved({
@@ -1095,7 +1095,7 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
         if (shouldNotifyRejection) {
           const emailEnabled = await communicationModel.isEmailEnabledForEvent('Pedido rejeitado');
           if (emailEnabled) {
-            await sendEmail({
+            sendEmailAsync({
               to: consultorAccount.email,
               subject: 'Pedido Rejeitado - PINT',
               html: emailTemplates.requestRejected({
@@ -1129,7 +1129,7 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
               );
               for (const sll of sllRows) {
                 if (sll.email) {
-                  await sendEmail({
+                  sendEmailAsync({
                     to: sll.email,
                     subject: 'Pedido Encaminhado para Validacao - PINT',
                     html: emailTemplates.requestApprovedForwardedToSLL({
@@ -1152,7 +1152,7 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
               });
               for (const admin of adminRows) {
                 if (admin.email) {
-                  await sendEmail({
+                  sendEmailAsync({
                     to: admin.email,
                     subject: 'Pedido Encaminhado para Validacao - PINT',
                     html: emailTemplates.requestApprovedForwardedToSLL({
@@ -1173,7 +1173,7 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
         try {
           const tmConfirmEnabled = await communicationModel.isEmailEnabledForEvent('Confirmacao aprovacao TM');
           if (tmConfirmEnabled && actorAccount?.email) {
-            await sendEmail({
+            sendEmailAsync({
               to: actorAccount.email,
               subject: 'Aprovacao Registada - PINT',
               html: emailTemplates.managerApprovalConfirmation({
@@ -1200,7 +1200,7 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
             });
             for (const tm of tmRows) {
               if (tm.email) {
-                await sendEmail({
+                sendEmailAsync({
                   to: tm.email,
                   subject: 'Badge Atribuida - PINT',
                   html: emailTemplates.requestSubmittedToManager({
@@ -1220,7 +1220,7 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
             });
             for (const admin of adminRows) {
               if (admin.email) {
-                await sendEmail({
+                sendEmailAsync({
                   to: admin.email,
                   subject: 'Badge Atribuida - PINT',
                   html: emailTemplates.requestSubmittedToManager({
@@ -1241,7 +1241,7 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
           try {
             const sllConfirmEnabled = await communicationModel.isEmailEnabledForEvent('Confirmacao aprovacao SLL');
             if (sllConfirmEnabled && actorAccount?.email) {
-              await sendEmail({
+              sendEmailAsync({
                 to: actorAccount.email,
                 subject: 'Aprovacao Registada - PINT',
                 html: emailTemplates.sllApprovalConfirmation({
@@ -1262,7 +1262,7 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
         try {
           const tmConfirmEnabled = await communicationModel.isEmailEnabledForEvent('Confirmacao rejeicao TM');
           if (tmConfirmEnabled && actorAccount?.email) {
-            await sendEmail({
+            sendEmailAsync({
               to: actorAccount.email,
               subject: 'Rejeicao Registada - PINT',
               html: emailTemplates.managerRejectionConfirmation({
@@ -1282,7 +1282,7 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
         try {
           const sllConfirmEnabled = await communicationModel.isEmailEnabledForEvent('Confirmacao rejeicao SLL');
           if (sllConfirmEnabled && actorAccount?.email) {
-            await sendEmail({
+            sendEmailAsync({
               to: actorAccount.email,
               subject: 'Rejeicao Registada - PINT',
               html: emailTemplates.sllRejectionConfirmation({

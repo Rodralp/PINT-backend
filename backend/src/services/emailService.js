@@ -1,21 +1,6 @@
-import nodemailer from 'nodemailer';
 import { emailConfig } from '../config/email.js';
 
-let transporter = null;
-
-const getTransporter = () => {
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host: emailConfig.host,
-      port: emailConfig.port,
-      secure: emailConfig.secure,
-      auth: emailConfig.auth,
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-    });
-  }
-  return transporter;
-};
+const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
 
 export const sendEmail = async ({ to, subject, html }) => {
   if (!to || !subject || !html) {
@@ -23,22 +8,46 @@ export const sendEmail = async ({ to, subject, html }) => {
     return null;
   }
 
-  if (!emailConfig.auth.user || !emailConfig.auth.pass) {
-    console.warn('sendEmail: SMTP not configured (EMAIL_USER+EMAIL_PASS missing). Skipping.');
+  const apiKey = emailConfig.brevoApiKey;
+  const senderEmail = emailConfig.senderEmail;
+
+  if (!apiKey || !senderEmail) {
+    console.warn('sendEmail: BREVO_API_KEY or EMAIL_USER not configured. Skipping.');
     return null;
   }
 
   try {
-    const info = await getTransporter().sendMail({
-      from: emailConfig.from,
-      to,
-      subject,
-      html,
+    const response = await fetch(BREVO_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': apiKey,
+      },
+      body: JSON.stringify({
+        sender: { name: emailConfig.senderName, email: senderEmail },
+        to: [{ email: to }],
+        subject,
+        htmlContent: html,
+      }),
     });
-    console.log(`sendEmail: sent to ${to} via SMTP (${info.messageId})`);
-    return info;
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      console.error(`sendEmail: Brevo API error for ${to}:`, JSON.stringify(result));
+      return null;
+    }
+
+    console.log(`sendEmail: sent to ${to} (${result.messageId})`);
+    return result;
   } catch (error) {
-    console.error(`sendEmail: SMTP failed for ${to}:`, error.message || error);
+    console.error(`sendEmail: failed for ${to}:`, error.message || error);
     return null;
   }
+};
+
+export const sendEmailAsync = ({ to, subject, html }) => {
+  sendEmail({ to, subject, html }).catch((err) => {
+    console.error('sendEmailAsync: unhandled error:', err);
+  });
 };
