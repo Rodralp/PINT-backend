@@ -10,6 +10,8 @@ const getTransporter = () => {
       port: emailConfig.port,
       secure: emailConfig.secure,
       auth: emailConfig.auth,
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
     });
   }
   return transporter;

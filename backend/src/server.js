@@ -41,7 +41,7 @@ const startServer = async () => {
           secure: emailConfig.secure,
           auth: emailConfig.auth,
           connectionTimeout: 10000,
-          greetingTimeout: 5000,
+          greetingTimeout: 10000,
         });
         await transporter.verify();
         console.log('SMTP connection verified successfully.');
