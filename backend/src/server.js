@@ -32,7 +32,9 @@ const startServer = async () => {
       console.error('Failed to ensure notification defaults:', notifError);
     }
 
-    if (emailConfig.auth.user && emailConfig.auth.pass) {
+    if (emailConfig.resendApiKey) {
+      console.log('Resend email configured (API key present). Email features enabled.');
+    } else if (emailConfig.auth.user && emailConfig.auth.pass) {
       try {
         const transporter = nodemailer.createTransport({
           host: emailConfig.host,
@@ -48,7 +50,7 @@ const startServer = async () => {
         console.warn('SMTP verification failed. Emails may not be sent.', emailError?.message || emailError);
       }
     } else {
-      console.warn('Email not configured (EMAIL_USER/EMAIL_PASS missing). Email features disabled.');
+      console.warn('Email not configured (RESEND_API_KEY / EMAIL_USER+EMAIL_PASS missing). Email features disabled.');
     }
 
     const { requestManagementModel } = await import('./models/requestManagementModel.js');

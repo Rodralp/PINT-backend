@@ -606,7 +606,7 @@ export const authModel = {
       // Fetch user info before approval for email
       const userAccount = await Account.findByPk(Number(accountId), { attributes: ['nome', 'email'] });
 
-      const result = this.updateAdminUserStatus(accountId, { status: 'ativo' });
+      const result = await this.updateAdminUserStatus(accountId, { status: 'ativo' });
 
       // Send approval email
       if (userAccount?.email) {

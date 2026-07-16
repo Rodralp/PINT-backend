@@ -6,6 +6,8 @@ const {
   EMAIL_USER = '',
   EMAIL_PASS = '',
   EMAIL_FROM = '',
+  RESEND_API_KEY = '',
+  RESEND_FROM = '',
 } = globalThis.process?.env ?? {};
 
 export const emailConfig = {
@@ -17,4 +19,6 @@ export const emailConfig = {
     pass: EMAIL_PASS,
   },
   from: EMAIL_FROM || EMAIL_USER,
+  resendApiKey: RESEND_API_KEY,
+  resendFrom: RESEND_FROM,
 };
