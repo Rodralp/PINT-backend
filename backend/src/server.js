@@ -4,6 +4,7 @@ import { connectToDatabase, syncDatabase } from './config/database.js';
 import { seedDatabase } from './config/seedData.js';
 import { emailConfig } from './config/email.js';
 
+
 const PORT = Number(globalThis.process?.env?.PORT) || 4000;
 
 globalThis.process?.on?.('unhandledRejection', (reason, promise) => {
@@ -32,9 +33,7 @@ const startServer = async () => {
       console.error('Failed to ensure notification defaults:', notifError);
     }
 
-    if (emailConfig.resendApiKey) {
-      console.log('Resend email configured (API key present). Email features enabled.');
-    } else if (emailConfig.auth.user && emailConfig.auth.pass) {
+    if (emailConfig.auth.user && emailConfig.auth.pass) {
       try {
         const transporter = nodemailer.createTransport({
           host: emailConfig.host,
@@ -50,7 +49,7 @@ const startServer = async () => {
         console.warn('SMTP verification failed. Emails may not be sent.', emailError?.message || emailError);
       }
     } else {
-      console.warn('Email not configured (RESEND_API_KEY / EMAIL_USER+EMAIL_PASS missing). Email features disabled.');
+      console.warn('Email not configured (EMAIL_USER+EMAIL_PASS missing). Email features disabled.');
     }
 
     const { requestManagementModel } = await import('./models/requestManagementModel.js');

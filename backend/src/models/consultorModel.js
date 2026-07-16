@@ -2263,6 +2263,29 @@ const requestBadgeAcquisition = async (accountId, badgeId) => {
             });
           }
         }
+
+        // Send email to all active admin-gestors
+        const adminRows = await Account.findAll({
+          where: {
+            status: 'ativo',
+            permissoes: { [Op.iLike]: '%admin-gestor%' },
+          },
+          attributes: ['nome', 'email'],
+          raw: true,
+        });
+        for (const admin of adminRows) {
+          if (admin.email) {
+            await sendEmail({
+              to: admin.email,
+              subject: 'Novo Pedido de Badge - PINT',
+              html: emailTemplates.requestSubmittedToManager({
+                managerName: admin.nome || 'Administrador',
+                consultorName: consultorInfo?.nome || 'Consultor',
+                badgeName: badgeInfo?.b_nome || 'Badge',
+              }),
+            });
+          }
+        }
       }
     } catch (emailError) {
       console.error('Failed to send request submission email.', emailError);

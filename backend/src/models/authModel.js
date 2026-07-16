@@ -174,6 +174,38 @@ export const authModel = {
       console.error('Failed to notify new registration.', error);
     }
 
+    try {
+      const emailEnabled = await communicationModel.isEmailEnabledForEvent('Novo registo');
+      if (emailEnabled) {
+        await sendEmail({
+          to: account.email,
+          subject: 'Registo Recebido - PINT',
+          html: emailTemplates.registrationReceived({ userName: account.nome || 'Utilizador' }),
+        });
+
+        const adminRows = await Account.findAll({
+          where: { status: 'ativo', permissoes: { [Op.iLike]: '%admin-gestor%' } },
+          attributes: ['nome', 'email'],
+          raw: true,
+        });
+        for (const admin of adminRows) {
+          if (admin.email) {
+            await sendEmail({
+              to: admin.email,
+              subject: 'Novo Registo Pendente - PINT',
+              html: emailTemplates.newRegistrationPending({
+                adminName: admin.nome || 'Administrador',
+                userName: account.nome || 'Utilizador',
+                userEmail: account.email,
+              }),
+            });
+          }
+        }
+      }
+    } catch (emailError) {
+      console.error('Failed to send registration emails.', emailError);
+    }
+
     return sanitizeAccount(account, false);
   },
 
@@ -455,6 +487,19 @@ export const authModel = {
         });
       } catch (error) {
         console.error('Failed to notify admin-created user.', error);
+      }
+
+      try {
+        const emailEnabled = await communicationModel.isEmailEnabledForEvent('Novo registo');
+        if (emailEnabled && mappedUser.email) {
+          await sendEmail({
+            to: mappedUser.email,
+            subject: 'Conta Aprovada - PINT',
+            html: emailTemplates.registrationApproved({ userName: mappedUser.nome || 'Utilizador' }),
+          });
+        }
+      } catch (emailError) {
+        console.error('Failed to send admin-created user email.', emailError);
       }
 
       return mappedUser;

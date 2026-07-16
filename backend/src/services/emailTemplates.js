@@ -141,4 +141,31 @@ export const emailTemplates = {
       <p>A sua rejeicao do pedido da badge <strong>${badgeName}</strong> do consultor <strong>${consultorName}</strong> foi registada com sucesso.</p>
       <p>O consultor foi notificado da decisao.</p>
     `),
+
+  registrationReceived: ({ userName }) =>
+    wrapTemplate('Registo Recebido', `
+      <p>Ola <strong>${userName}</strong>,</p>
+      <p>O seu registo foi recebido com sucesso e esta pendente de aprovacao pelo administrador.</p>
+      <p>Recebera uma notificacao assim que a sua conta for aprovada.</p>
+      <p>
+        <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/entrar"
+           style="${buttonStyle}">
+          Ver Plataforma
+        </a>
+      </p>
+    `),
+
+  newRegistrationPending: ({ adminName, userName, userEmail }) =>
+    wrapTemplate('Novo Registo Pendente', `
+      <p>Ola <strong>${adminName}</strong>,</p>
+      <p>Um novo utilizador registou-se na plataforma e aguarda a sua aprovacao.</p>
+      <p><strong>Nome:</strong> ${userName}</p>
+      <p><strong>Email:</strong> ${userEmail}</p>
+      <p>
+        <a href="${process.env.FRONTEND_URL || 'http://localhost:5173'}/admin/gestao-utilizadores"
+           style="${buttonStyle}">
+          Gerir Utilizadores
+        </a>
+      </p>
+    `),
 };

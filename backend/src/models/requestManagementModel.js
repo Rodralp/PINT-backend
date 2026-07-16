@@ -1140,6 +1140,29 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
                   });
                 }
               }
+
+              // Send email to all active admin-gestors
+              const adminRows = await Account.findAll({
+                where: {
+                  status: 'ativo',
+                  permissoes: { [Op.iLike]: '%admin-gestor%' },
+                },
+                attributes: ['nome', 'email'],
+                raw: true,
+              });
+              for (const admin of adminRows) {
+                if (admin.email) {
+                  await sendEmail({
+                    to: admin.email,
+                    subject: 'Pedido Encaminhado para Validacao - PINT',
+                    html: emailTemplates.requestApprovedForwardedToSLL({
+                      sllName: admin.nome || 'Administrador',
+                      consultorName,
+                      badgeName,
+                    }),
+                  });
+                }
+              }
             }
           }
         } catch (sllEmailError) {
@@ -1182,6 +1205,26 @@ const applyDecision = async ({ role, actorUtilizadorId, request, decision, comme
                   subject: 'Badge Atribuida - PINT',
                   html: emailTemplates.requestSubmittedToManager({
                     managerName: tm.nome || 'Talent Manager',
+                    consultorName,
+                    badgeName,
+                  }),
+                });
+              }
+            }
+
+            // Send email to all active admin-gestors
+            const adminRows = await Account.findAll({
+              where: { status: 'ativo', permissoes: { [Op.iLike]: '%admin-gestor%' } },
+              attributes: ['nome', 'email'],
+              raw: true,
+            });
+            for (const admin of adminRows) {
+              if (admin.email) {
+                await sendEmail({
+                  to: admin.email,
+                  subject: 'Badge Atribuida - PINT',
+                  html: emailTemplates.requestSubmittedToManager({
+                    managerName: admin.nome || 'Administrador',
                     consultorName,
                     badgeName,
                   }),
