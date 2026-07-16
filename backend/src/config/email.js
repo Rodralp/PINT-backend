@@ -1,16 +1,16 @@
 import 'dotenv/config';
 
 const {
-  EMAIL_USER = '',
-  EMAIL_FROM = '',
-  BREVO_API_KEY = '',
+  MJ_API_KEY = '',
+  MJ_API_SECRET = '',
+  MJ_SENDER_EMAIL = '',
   FRONTEND_URL = '',
 } = globalThis.process?.env ?? {};
 
 export const emailConfig = {
-  brevoApiKey: BREVO_API_KEY,
-  senderEmail: EMAIL_USER,
+  mailjetApiKey: MJ_API_KEY,
+  mailjetApiSecret: MJ_API_SECRET,
+  senderEmail: MJ_SENDER_EMAIL,
   senderName: 'PINT',
-  from: EMAIL_FROM || EMAIL_USER,
   frontendUrl: FRONTEND_URL || 'http://localhost:5173',
 };

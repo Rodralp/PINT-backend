@@ -31,10 +31,10 @@ const startServer = async () => {
       console.error('Failed to ensure notification defaults:', notifError);
     }
 
-    if (emailConfig.brevoApiKey && emailConfig.senderEmail) {
-      console.log(`Email configured: Brevo API ready (sender: ${emailConfig.senderEmail}).`);
+    if (emailConfig.mailjetApiKey && emailConfig.mailjetApiSecret && emailConfig.senderEmail) {
+      console.log(`Email configured: Mailjet API ready (sender: ${emailConfig.senderEmail}).`);
     } else {
-      console.warn('Email not configured (BREVO_API_KEY / EMAIL_USER missing). Email features disabled.');
+      console.warn('Email not configured (MJ_API_KEY/MJ_API_SECRET/MJ_SENDER_EMAIL missing). Email features disabled.');
     }
 
     const { requestManagementModel } = await import('./models/requestManagementModel.js');
