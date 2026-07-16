@@ -8,6 +8,14 @@ const getAuthHeader = () => {
   return 'Basic ' + Buffer.from(`${mailjetApiKey}:${mailjetApiSecret}`).toString('base64');
 };
 
+const stripHtml = (html) => {
+  return String(html || '')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
 export const sendEmail = async ({ to, subject, html }) => {
   if (!to || !subject || !html) {
     console.error('sendEmail: missing required fields (to, subject, html).');
@@ -19,6 +27,8 @@ export const sendEmail = async ({ to, subject, html }) => {
     console.warn('sendEmail: MJ_API_KEY/MJ_API_SECRET not configured. Skipping.');
     return null;
   }
+
+  const textPart = stripHtml(html);
 
   try {
     const response = await fetch(MAILJET_API_URL, {
@@ -40,6 +50,7 @@ export const sendEmail = async ({ to, subject, html }) => {
               },
             ],
             Subject: subject,
+            TextPart: textPart,
             HTMLPart: html,
           },
         ],
