@@ -2537,6 +2537,7 @@ const getPedidoDetail = async (accountId, pedidoId) => {
     status,
     points: resolvedPoints,
     badgeImage: resolveBadgeImage(row.badge_imagem, template.badgeImage, isSpecial),
+    levelKey: template.levelKey,
     expiresAt: formatDate(row.validade),
     submittedBy: row.consultor_nome || 'Utilizador',
     submissionDate: formatShortDate(row.data_submissao),

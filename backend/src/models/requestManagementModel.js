@@ -669,6 +669,7 @@ const mapRequestListItem = (row, role) => {
     status,
     tableStatus: mapTableStatus(status),
     points: Number(row.badge_pontos) > 0 ? Number(row.badge_pontos) : levelTemplate.points,
+    levelKey: levelTemplate.levelKey,
     badgeImage: levelTemplate.badgeImage,
   };
 };
