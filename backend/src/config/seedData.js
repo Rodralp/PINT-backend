@@ -33,8 +33,8 @@ const defaultAccounts = [
     status: 'ativo',
   },
   {
-    nome: 'Testes',
-    email: 'testes@softinsa.pt',
+    nome: 'Ednaldo Pereira',
+    email: 'ednaldo@softinsa.pt',
     senha: '12345678',
     role: 'consultor;talent-manager;service-line-leader;admin-gestor',
     status: 'ativo',
