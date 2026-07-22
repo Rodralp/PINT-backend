@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { sequelize } from '../config/database.js';
 import { Account } from './sql/Account.js';
+import { utilizadorImagemModel } from './utilizadorImagemModel.js';
 import { Estado } from './sql/Estado.js';
 import { Requisito } from './sql/Requisito.js';
 import { Evidencia } from './sql/Evidencia.js';
@@ -200,8 +201,6 @@ const formatLongDate = (value) => {
   });
 };
 
-const buildAvatar = () => null;
-
 const getServiceLineIdForBadge = async (badgeId) => {
   const parsedBadgeId = Number(badgeId);
   if (!Number.isInteger(parsedBadgeId) || parsedBadgeId <= 0) {
@@ -395,7 +394,7 @@ const mapRoleOrder = (role) => {
 
 const shouldRoleReviewRequest = (role, estadoNome) => {
   if (role === 'admin-gestor') {
-    return isManagedWorkflowState(estadoNome);
+    return isPendingTmState(estadoNome) || isPendingSllState(estadoNome);
   }
 
   if (role === 'talent-manager') {
@@ -670,7 +669,9 @@ const mapRequestListItem = (row, role) => {
     tableStatus: mapTableStatus(status),
     points: Number(row.badge_pontos) > 0 ? Number(row.badge_pontos) : levelTemplate.points,
     levelKey: levelTemplate.levelKey,
+    typeId: levelTemplate.levelKey,
     badgeImage: levelTemplate.badgeImage,
+    badgeFrameImage: null,
   };
 };
 
@@ -761,16 +762,29 @@ const mapRequestDetails = async (row, role) => {
   const reviewerSeed = reviewerEntry?.authorId || reviewerEntry?.authorName || role;
   const canReview = shouldRoleReviewRequest(role, estadoNome);
 
+  const avatarUserIds = [];
+  if (row.consultor_id) avatarUserIds.push(Number(row.consultor_id));
+  if (reviewerEntry?.authorId) avatarUserIds.push(Number(reviewerEntry.authorId));
+  const uniqueAvatarIds = [...new Set(avatarUserIds.filter((id) => Number.isInteger(id) && id > 0))];
+  const avatarMap = uniqueAvatarIds.length > 0
+    ? await utilizadorImagemModel.loadUserImagesBatch(uniqueAvatarIds)
+    : {};
+
+  const consultorAvatar = avatarMap[Number(row.consultor_id)] || null;
+  const reviewerAvatar = reviewerEntry?.authorId
+    ? avatarMap[Number(reviewerEntry.authorId)] || null
+    : null;
+
   return {
     ...baseItem,
     badgeDbId: Number(row.nbadge),
     expiresAt: formatDate(row.badge_validade),
     submittedBy: row.consultor_nome,
-    submittedByAvatar: buildAvatar(`consultor-${row.consultor_id}`),
+    submittedByAvatar: consultorAvatar,
     submittedDate: formatLongDate(row.data_submissao),
     reviewer: reviewerName,
     reviewerRole,
-    reviewerAvatar: buildAvatar(`reviewer-${reviewerSeed}`),
+    reviewerAvatar,
     reviewerDate: formatLongDate(row.data_submissao),
     notes: buildStatusNote(status, row.estado_nome, row.descricao),
     motives: motives.map((item) => ({
@@ -780,7 +794,7 @@ const mapRequestDetails = async (row, role) => {
     })),
     canReview,
     finalReviewer: status === 'aprovado' ? reviewerName : null,
-    finalReviewerAvatar: status === 'aprovado' ? buildAvatar(`final-${reviewerSeed}`) : null,
+    finalReviewerAvatar: status === 'aprovado' ? reviewerAvatar : null,
     finalReviewerDate: status === 'aprovado' ? formatLongDate(row.data_submissao) : null,
     evidence: requirements,
   };

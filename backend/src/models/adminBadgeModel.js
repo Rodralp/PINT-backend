@@ -268,9 +268,13 @@ const resolveStandardBadgeTypeId = async ({ requestedTypeId, levelTitle, transac
 
   const normalizedRequestedType = normalizeForCompare(requestedTypeId);
   if (normalizedRequestedType) {
+    const strippedType = normalizedRequestedType.replace(/^badge_level_/, '');
     const directNameMatch = standardTypes.find((type) => {
       const normalizedTypeName = normalizeForCompare(type.tipo);
-      return normalizedTypeName === normalizedRequestedType || normalizedTypeName.includes(normalizedRequestedType);
+      return normalizedTypeName === normalizedRequestedType
+        || normalizedTypeName.includes(normalizedRequestedType)
+        || normalizedTypeName === strippedType
+        || normalizedTypeName.includes(strippedType);
     });
 
     if (directNameMatch?.ntipo) {

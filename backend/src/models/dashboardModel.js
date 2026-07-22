@@ -45,7 +45,6 @@ const ensureDataRegistoColumn = async () => {
 const MANAGER_BADGES_TIMELINE_DAYS = 12;
 const MANAGER_NEW_CONSULTORES_DAYS = 10;
 const MANAGER_TOP_CONSULTORES_LIMIT = 4;
-const MANAGER_RECENT_ACTIVITY_LIMIT = 4;
 const CONSULTOR_TIMELINE_DAYS = 12;
 
 const managerRoleSet = new Set(['talent-manager', 'service-line-leader', 'admin-gestor']);
@@ -486,12 +485,10 @@ const getManagerDashboardDataFromDb = async (role, accountId) => {
         ) AS recent_activities
         WHERE activity_date IS NOT NULL
         ORDER BY activity_date DESC, title ASC
-        LIMIT :activityLimit
       `,
       {
         replacements: {
           ...commonScopeReplacements,
-          activityLimit: MANAGER_RECENT_ACTIVITY_LIMIT,
         },
         type: QueryTypes.SELECT,
       },
