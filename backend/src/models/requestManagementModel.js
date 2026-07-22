@@ -15,7 +15,7 @@ import { TmGereP } from './sql/TmGereP.js';
 import { SllGereP } from './sql/SllGereP.js';
 import { AdmGereP } from './sql/AdmGereP.js';
 import { PedidoHistorico } from './sql/PedidoHistorico.js';
-import { syncSpecialBadgesForConsultor } from './consultorModel.js';
+import { syncSpecialBadgesForConsultor, resolveBadgeImage, resolveBadgeTemplate, isSpecialTypeName } from './consultorModel.js';
 import { communicationModel } from './communicationModel.js';
 import { sendEmailAsync } from '../services/emailService.js';
 import { emailTemplates } from '../services/emailTemplates.js';
@@ -559,6 +559,9 @@ const fetchRequestRows = async ({ role, actorUtilizadorId, requestId = null }) =
         u.nome AS consultor_nome,
         b.b_nome AS badge_nome,
         b.b_descricao AS badge_descricao,
+        b.imagem AS badge_imagem,
+        b.ntipo AS badge_tipo_id,
+        t.tipo AS tipo_nome,
         b.validade AS badge_validade,
         COALESCE(NULLIF(b.pontos, 0), 0) AS badge_pontos,
         n.nivel AS nivel_nome,
@@ -574,6 +577,8 @@ const fetchRequestRows = async ({ role, actorUtilizadorId, requestId = null }) =
         ON u.nutilizador = p.nutilizador
       LEFT JOIN badge AS b
         ON b.nbadge = p.nbadge
+      LEFT JOIN tipo AS t
+        ON t.ntipo = b.ntipo
       LEFT JOIN nivel_contem_b AS ncb
         ON ncb.nbadge = p.nbadge
       LEFT JOIN nivel AS n
@@ -609,6 +614,9 @@ const fetchRequestRows = async ({ role, actorUtilizadorId, requestId = null }) =
         u.nome AS consultor_nome,
         b.b_nome AS badge_nome,
         b.b_descricao AS badge_descricao,
+        b.imagem AS badge_imagem,
+        b.ntipo AS badge_tipo_id,
+        t.tipo AS tipo_nome,
         b.validade AS badge_validade,
         COALESCE(NULLIF(b.pontos, 0), 0) AS badge_pontos,
         n.nivel AS nivel_nome,
@@ -626,6 +634,8 @@ const fetchRequestRows = async ({ role, actorUtilizadorId, requestId = null }) =
         ON u.nutilizador = p.nutilizador
       LEFT JOIN badge AS b
         ON b.nbadge = p.nbadge
+      LEFT JOIN tipo AS t
+        ON t.ntipo = b.ntipo
       LEFT JOIN nivel_contem_b AS ncb
         ON ncb.nbadge = p.nbadge
       LEFT JOIN nivel AS n
@@ -652,7 +662,8 @@ const fetchRequestRows = async ({ role, actorUtilizadorId, requestId = null }) =
 
 const mapRequestListItem = (row, role) => {
   const levelTitle = normalizeLevelTitle(row.nivel_nome) || 'Intermédio';
-  const levelTemplate = resolveLevelTemplate(levelTitle);
+  const isSpecial = isSpecialTypeName(row.tipo_nome);
+  const template = resolveBadgeTemplate(row.nivel_nome, 0, row.tipo_nome);
   const status = mapRowStatus(row.estado_nome, row.obtido, role);
 
   return {
@@ -667,10 +678,10 @@ const mapRequestListItem = (row, role) => {
     date: formatDate(row.data_submissao),
     status,
     tableStatus: mapTableStatus(status),
-    points: Number(row.badge_pontos) > 0 ? Number(row.badge_pontos) : levelTemplate.points,
-    levelKey: levelTemplate.levelKey,
-    typeId: levelTemplate.levelKey,
-    badgeImage: levelTemplate.badgeImage,
+    points: Number(row.badge_pontos) > 0 ? Number(row.badge_pontos) : template.points,
+    levelKey: isSpecial ? null : template.levelKey,
+    typeId: isSpecial ? 'special' : template.levelKey,
+    badgeImage: resolveBadgeImage(row.badge_imagem, template.badgeImage, isSpecial),
     badgeFrameImage: null,
   };
 };
