@@ -15,11 +15,13 @@ import { TmGereP } from './sql/TmGereP.js';
 import { SllGereP } from './sql/SllGereP.js';
 import { AdmGereP } from './sql/AdmGereP.js';
 import { PedidoHistorico } from './sql/PedidoHistorico.js';
-import { syncSpecialBadgesForConsultor, resolveBadgeImage, resolveBadgeTemplate, isSpecialTypeName } from './consultorModel.js';
+import { syncSpecialBadgesForConsultor, consultorModel } from './consultorModel.js';
 import { communicationModel } from './communicationModel.js';
 import { sendEmailAsync } from '../services/emailService.js';
 import { emailTemplates } from '../services/emailTemplates.js';
 import { adminBadgeModel } from './adminBadgeModel.js';
+
+const { resolveBadgeImage, resolveBadgeTemplate, isSpecialTypeName } = consultorModel;
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const uploadsDir = path.resolve(globalThis.process?.cwd?.() || '.', 'uploads');
