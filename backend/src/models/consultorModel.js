@@ -2519,13 +2519,29 @@ const getPedidoDetail = async (accountId, pedidoId) => {
   let reviewerName = null;
   let reviewerDate = null;
   let reviewerNote = null;
+  let reviewerAccountId = null;
 
   if (motiveRows.length > 0) {
     const lastMotive = motiveRows[motiveRows.length - 1];
     reviewerName = lastMotive.utilizador?.nome || null;
     reviewerNote = lastMotive.motivo_desc || null;
     reviewerDate = formatShortDate(row.data_submissao);
+    reviewerAccountId = Number(lastMotive.nutilizador) || null;
   }
+
+  const avatarUserIds = [utilizadorId];
+  if (reviewerAccountId && Number.isInteger(reviewerAccountId) && reviewerAccountId > 0) {
+    avatarUserIds.push(reviewerAccountId);
+  }
+  const uniqueAvatarIds = [...new Set(avatarUserIds.filter((id) => Number.isInteger(id) && id > 0))];
+  let avatarMap = {};
+  if (uniqueAvatarIds.length > 0) {
+    const { utilizadorImagemModel } = await import('./utilizadorImagemModel.js');
+    avatarMap = await utilizadorImagemModel.loadUserImagesBatch(uniqueAvatarIds);
+  }
+
+  const consultorAvatar = avatarMap[utilizadorId] || null;
+  const reviewerAvatar = reviewerAccountId ? avatarMap[reviewerAccountId] || null : null;
 
   return {
     id: parsedPedidoId,
@@ -2540,9 +2556,11 @@ const getPedidoDetail = async (accountId, pedidoId) => {
     levelKey: template.levelKey,
     expiresAt: formatDate(row.validade),
     submittedBy: row.consultor_nome || 'Utilizador',
+    submittedByAvatar: consultorAvatar,
     submissionDate: formatShortDate(row.data_submissao),
     requirements: badgeRequirements,
     reviewerName,
+    reviewerAvatar,
     reviewerDate,
     reviewerNote,
   };
